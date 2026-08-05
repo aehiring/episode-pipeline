@@ -216,15 +216,40 @@ def run_postmaster(ep):
     info(f"EPISODE READY: {final} ({os.path.getsize(final)//1024} KB)")
 
 
+def _write_report(ep, t0, t1, scene_times):
+    total_s = t1 - t0
+    lines = [
+        f"Episode: {ep['episode'].get('title', '')}",
+        f"Started:  {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(t0))}",
+        f"Finished: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(t1))}",
+        f"Total time: {total_s/60:.1f} min ({total_s:.0f}s)",
+        "",
+        "Per-scene render time:",
+    ]
+    for n, dt in scene_times:
+        lines.append(f"  scene {n}: {dt/60:.2f} min")
+    if RATE > 0:
+        lines += ["", f"Estimated GPU cost: ${(total_s/3600)*RATE:.2f} at ${RATE}/hr"]
+    path = os.path.join(COMFY_OUTPUT, "EPISODE_REPORT.txt")
+    with open(path, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    info(f"report written: {path}")
+
+
 def run_episode(ep):
     n_scenes = ep["episode"]["scene_count"]
     if n_scenes != len(ep["scenes"]):
         raise RuntimeError(f"watchdog FATAL: episode.scene_count={n_scenes} but {len(ep['scenes'])} scenes present")
     governor = Governor(ep["totals"]["total_frames_16fps"], RATE)
+    t_start = time.time()
     run_anchor(ep)
+    scene_times = []
     for scene in sorted(ep["scenes"], key=lambda s: s["scene_number"]):
+        t_sc = time.time()
         run_scene(ep, scene, governor)
+        scene_times.append((scene["scene_number"], time.time() - t_sc))
     run_postmaster(ep)
+    _write_report(ep, t_start, time.time(), scene_times)
 
 
 def main():

@@ -50,6 +50,15 @@ def wait_and_fetch(base_url, out_dir, poll_s=POLL_S, stable_checks=STABLE_CHECKS
     log(f"[fetch_final] downloading -> {dest}")
     urllib.request.urlretrieve(url, dest)
     log(f"[fetch_final] done: {dest} ({os.path.getsize(dest)} bytes)")
+
+    report_url = f"{base_url.rstrip('/')}/view?filename=EPISODE_REPORT.txt&type=output"
+    try:
+        report_dest = os.path.join(out_dir, "EPISODE_REPORT.txt")
+        urllib.request.urlretrieve(report_url, report_dest)
+        log(f"[fetch_final] also got: {report_dest}")
+    except Exception:
+        log("[fetch_final] EPISODE_REPORT.txt not available (older run without it) — skipping")
+
     return dest
 
 
