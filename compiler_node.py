@@ -22,7 +22,7 @@ def _write_compiled(ep_json_str):
     with open(tmp, "w") as f: f.write(ep_json_str)
     os.replace(tmp, COMPILED_PATH)
 
-def _claude(system, user, max_tokens=16000):
+def _claude(system, user, max_tokens=48000):
     key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if not key:
         raise RuntimeError("EpisodeCompile FATAL: ANTHROPIC_API_KEY not set")
@@ -87,16 +87,19 @@ VISUAL QUALITY RULES — these affect what actually renders, follow them exactly
    scratch every scene and will drift or swap identities without a repeated,
    literal description — a bare name is not enough.
 
-2. NARRATOR / speaker=NONE SCENES — NO VISIBLE FACES, EVER: every scene's
-   audio (including narration) is fed into an audio-driven lip-sync model
-   that animates the mouth of ANY clear face present in the keyframe, whether
-   or not that character is the one "speaking". For speaker=NARRATOR or
-   speaker=NONE: keyframe_prompt and motion_prompts must NOT describe any
-   character with a visible, forward-facing mouth. Use establishing/
-   environment shots, characters seen from behind or at a distance,
-   silhouettes, or objects/hands only. Writing "wide shot" alone is not
-   enough — say explicitly "no faces visible", "seen from behind", or
-   "character silhouetted, back to camera".
+2. NARRATOR SCENES — NO VISIBLE FACES, EVER: a NARRATOR scene's real
+   voice-over audio is still fed into an audio-driven lip-sync model that
+   animates the mouth of ANY clear face present in the keyframe, even though
+   no on-screen character is actually speaking. For speaker=NARRATOR:
+   keyframe_prompt and motion_prompts must NOT describe any character with a
+   visible, forward-facing mouth. Use establishing/environment shots,
+   characters seen from behind or at a distance, silhouettes, or objects/
+   hands only. Writing "wide shot" alone is not enough — say explicitly
+   "no faces visible", "seen from behind", or "silhouetted, back to camera".
+   speaker=NONE is different and does NOT need this: its audio track is
+   silent (no narration, no dialogue), so there is nothing for the lip-sync
+   model to drive — faces are perfectly safe to show for NONE scenes
+   (establishing beats, action/reaction shots, held poses, etc.).
 
 3. DIALOGUE SCENES — SINGLE-SPEAKER FRAMING: the lip-sync model animates
    whichever face is most prominent; it cannot target one specific named
@@ -109,7 +112,27 @@ VISUAL QUALITY RULES — these affect what actually renders, follow them exactly
 
 4. Keep prompt language literal and concrete (what is physically visible in
    frame) rather than abstract mood/emotion words — the image model follows
-   literal visual descriptions far more reliably than tone words alone."""
+   literal visual descriptions far more reliably than tone words alone.
+
+5. SPLITTING SCENES — never merge multiple speakers into one scene object:
+   the schema only allows ONE speaker and ONE dialogue string per scene. If
+   the input script has several characters speaking back-to-back within what
+   it calls a single "scene"/beat, split that beat into consecutive JSON
+   scenes — one per speaker turn — each sized to the smallest chunk count
+   (1-5) that fits its dialogue's word budget, running start_time_s/
+   scene_number continuing in sequence. This is restructuring the container
+   only: copy every line of dialogue verbatim, do not shorten, paraphrase, or
+   drop any line, and do not invent new dialogue. Keep the same location/
+   environment description across the split scenes that came from one input
+   beat, so they read as one continuous moment, not a scene change.
+
+6. STILL / FREEZE / HOLD instructions in the input (e.g. "freeze frame",
+   "nothing moves for N seconds", "still image"): there is no true frozen-
+   frame render mode yet, so approximate it as a normal scene with
+   speaker=NONE, dialogue="NONE", and motion_prompts that explicitly describe
+   near-total stillness ("holds completely still", "no movement", "a single
+   held breath, otherwise motionless") rather than any real action. Pick the
+   chunk count closest to the requested hold duration."""
 
 class EpisodeCompile:
     @classmethod
