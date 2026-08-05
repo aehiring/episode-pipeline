@@ -161,6 +161,10 @@ def _find_output_file(entry, key_hint=None):
 # ── Episode orchestration ─────────────────────────────────────────────
 
 def run_anchor(ep):
+    dest = os.path.join(COMFY_INPUT, ANCHOR_LOCAL_NAME)
+    if os.path.isfile(dest) and os.path.getsize(dest) >= MIN_IMAGE_BYTES:
+        info(f"ANCHOR already present, skipping re-render: {dest}")
+        return
     info("submitting ANCHOR prompt")
     pid = _post_prompt(G.anchor_template(ep))
     entry = _wait_history(pid, SCENE_TIMEOUT_MIN, "ANCHOR")
@@ -179,6 +183,9 @@ def run_anchor(ep):
 def run_scene(ep, scene, governor):
     n = scene["scene_number"]
     dest = os.path.join(SCENES_DIR, f"scene_{n:05d}.mp4")
+    if os.path.isfile(dest) and os.path.getsize(dest) >= MIN_VIDEO_BYTES:
+        info(f"scene {n}: already rendered, skipping -> {dest}")
+        return
     last_err = None
     for attempt in range(1, MAX_RETRIES + 2):  # first try + MAX_RETRIES retries
         info(f"scene {n}: submitting (attempt {attempt})")
@@ -207,10 +214,13 @@ def run_scene(ep, scene, governor):
 
 
 def run_postmaster(ep):
+    final = os.path.join(COMFY_OUTPUT, "EPISODE_FINAL.mp4")
+    if os.path.isfile(final) and os.path.getsize(final) >= MIN_VIDEO_BYTES:
+        info(f"EPISODE_FINAL.mp4 already present, skipping PostMaster re-run: {final}")
+        return
     info("submitting PostMaster prompt")
     pid = _post_prompt(G.postmaster_template(ep, SCENES_DIR))
     _wait_history(pid, SCENE_TIMEOUT_MIN, "PostMaster")
-    final = os.path.join(COMFY_OUTPUT, "EPISODE_FINAL.mp4")
     if not os.path.isfile(final):
         raise RuntimeError(f"watchdog FATAL: PostMaster reported done but {final} is missing")
     info(f"EPISODE READY: {final} ({os.path.getsize(final)//1024} KB)")

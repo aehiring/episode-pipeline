@@ -63,9 +63,13 @@ class EpisodePostMaster:
                 if m:
                     found.setdefault(int(m.group(1)), f)
             need = ep["episode"]["scene_count"]
-            if sorted(found) != list(range(1, need + 1)):
-                raise RuntimeError(f"PostMaster FATAL: scene files {sorted(found)} "
-                                   f"!= expected 1..{need}")
+            missing = [i for i in range(1, need + 1) if i not in found]
+            if missing:
+                raise RuntimeError(f"PostMaster FATAL: scene files missing {missing} "
+                                   f"(found {sorted(found)}, need 1..{need})")
+            # extra numbers beyond `need` are stray artifacts (e.g. a raw
+            # VHS auto-numbered file left behind by a retried/re-run scene) —
+            # harmless to ignore as long as every scene 1..need is present
             files = [found[i] for i in range(1, need + 1)]
             lst = os.path.join(episode_video_path, "_concat.txt")
             with open(lst, "w") as f:
