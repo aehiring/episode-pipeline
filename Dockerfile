@@ -53,6 +53,7 @@ WORKDIR /opt/pipeline
 COPY episode_schema.json      ./
 COPY validator_core.py        ./
 COPY watchdog.py              ./
+COPY build_v17_graph.py       ./
 COPY assets/characters/       ./assets/characters/
 COPY assets/sfx/              ./assets/sfx/
 
@@ -84,6 +85,27 @@ for f in sorted(have & need):
 # nodes importable (logic layer only; torch parts lazy)
 sys.path.insert(0, '/opt/ComfyUI/custom_nodes/RenReedNodes')
 import validator_core, compiler_node, character_loader_node, renreed_tts_node, postmaster_node, scene_data_node  # noqa
+# watchdog's per-scene/anchor/postmaster templates build cleanly for a sample episode
+sys.path.insert(0, '/opt/pipeline')
+import build_v17_graph as bg
+_sample = {"schema_version":"1.0","episode":{"title":"t","logline":"t","lesson":"t","total_chunks":2,
+    "scene_count":1,"characters_used":["REN"]},
+    "scenes":[{"scene_number":1,"chunks":2,"duration_s":9.625,"start_time_s":0.0,"location":"X",
+    "time_of_day":"DAY","characters":["REN"],"speaker":"NONE","wardrobe":{"carry":True},"shot":"WIDE",
+    "keyframe_prompt":C["style_anchor"]+". x","motion_prompts":["a","b"],"dialogue":"NONE",
+    "dialogue_word_count":0,"sfx":[]}],
+    "totals":{"sum_chunks":2,"sum_duration_s":9.625,"total_frames_16fps":154}}
+for name, fn in [("anchor", lambda: bg.anchor_template(_sample)),
+                 ("scene", lambda: bg.scene_template(_sample, _sample["scenes"][0])),
+                 ("postmaster", lambda: bg.postmaster_template(_sample)),
+                 ("trigger", lambda: bg.trigger_template())]:
+    try:
+        g = fn()
+        bad = [(nid,k,v) for nid,node in g.items() for k,v in node["inputs"].items()
+               if isinstance(v,list) and len(v)==2 and isinstance(v[0],str) and v[0] not in g]
+        if bad: errs.append(f"{name}_template: dangling links {bad[:3]}")
+    except Exception as e:
+        errs.append(f"{name}_template FAILED to build: {e}")
 if errs:
     print("BUILD ASSERT FAILED:"); [print("  -", e) for e in errs]; sys.exit(1)
 print(f"BUILD ASSERTS OK: {len(C['roster'])} characters, {len(need)} SFX, 6 modules import clean")
@@ -101,6 +123,9 @@ ENV COMFY_HOST=http://127.0.0.1:8188 \
     CHARACTER_ASSET_DIR=/opt/pipeline/assets/characters \
     SFX_ASSET_DIR=/opt/pipeline/assets/sfx \
     EPISODE_AUDIO_DIR=/models/input/episode_audio \
+    EPISODE_COMPILED_PATH=/models/input/episode_compiled.json \
+    SCENE_TIMEOUT_MINUTES=20 \
+    SCENE_MAX_RETRIES=2 \
     EPISODE_CAP=5.50
 
 # runtime-only secrets/config — values come from the Vast template

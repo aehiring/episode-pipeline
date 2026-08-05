@@ -113,6 +113,97 @@ try:
     else: fail("validator", str(errs[:2]))
 except Exception as e: fail("validator", str(e))
 
+# 6. Watchdog scene-loop orchestration — direct regression test for the fixed
+#    while-loop bug: a mocked ComfyUI stands in for /prompt + /history, and we
+#    assert watchdog submits 3 separate scene prompts (not 1) and runs
+#    PostMaster exactly once, after all 3.
+print("\n▶ STEP 6: Watchdog multi-scene orchestration (mocked ComfyUI, no GPU)")
+try:
+    import http.server, threading, tempfile
+
+    WD_WORK = tempfile.mkdtemp(prefix="rr_wd_test_")
+    wd_input = os.path.join(WD_WORK, "input"); wd_output = os.path.join(WD_WORK, "output")
+    os.makedirs(wd_input, exist_ok=True); os.makedirs(wd_output, exist_ok=True)
+
+    submissions = []
+
+    class FakeComfy(http.server.BaseHTTPRequestHandler):
+        HISTORY = {}
+        def log_message(self, *a): pass
+        def _json(self, code, obj):
+            body = json.dumps(obj).encode()
+            self.send_response(code); self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body))); self.end_headers()
+            self.wfile.write(body)
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length) or b"{}")
+            if self.path == "/prompt":
+                graph = body.get("prompt", {})
+                classes = {n["class_type"] for n in graph.values()}
+                if "VHS_VideoCombine" in classes: kind = "scene"
+                elif "EpisodePostMaster" in classes: kind = "postmaster"
+                elif "SaveImage" in classes: kind = "anchor"
+                else: kind = "unknown"
+                pid = f"pid{len(submissions) + 1}"
+                submissions.append({"kind": kind, "pid": pid})
+                if kind == "anchor":
+                    open(os.path.join(wd_output, "ANCHOR_00001_.png"), "wb").write(b"x" * 20000)
+                    outputs = {"1": {"images": [{"filename": "ANCHOR_00001_.png", "subfolder": "", "type": "output"}]}}
+                elif kind == "scene":
+                    fn = f"scene_out_{pid}.mp4"
+                    open(os.path.join(wd_output, fn), "wb").write(b"x" * 20000)
+                    outputs = {"1": {"gifs": [{"filename": fn, "subfolder": "", "type": "output"}]}}
+                elif kind == "postmaster":
+                    open(os.path.join(wd_output, "EPISODE_FINAL.mp4"), "wb").write(b"x" * 20000)
+                    outputs = {}
+                else:
+                    outputs = {}
+                FakeComfy.HISTORY[pid] = {"status": {"completed": True}, "outputs": outputs}
+                self._json(200, {"prompt_id": pid})
+            elif self.path == "/interrupt":
+                self._json(200, {})
+            else:
+                self._json(404, {})
+        def do_GET(self):
+            if self.path.startswith("/history/"):
+                pid = self.path.split("/history/", 1)[1]
+                self._json(200, {pid: FakeComfy.HISTORY.get(pid, {"status": {"completed": False}})})
+            elif self.path == "/queue":
+                self._json(200, {"queue_running": [], "queue_pending": []})
+            else:
+                self._json(404, {})
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), FakeComfy)
+    port = server.server_address[1]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    os.environ["COMFY_HOST"] = f"http://127.0.0.1:{port}"
+    os.environ["COMFY_INPUT"] = wd_input
+    os.environ["COMFY_OUTPUT"] = wd_output
+    os.environ["STATE_DIR"] = os.path.join(WD_WORK, "state")
+    os.environ["SCENE_TIMEOUT_MINUTES"] = "1"
+    os.environ["STALL_MINUTES"] = "1"
+
+    spec5 = importlib.util.spec_from_file_location("wd_test", "watchdog.py")
+    wdmod = importlib.util.module_from_spec(spec5); spec5.loader.exec_module(wdmod)
+    wdmod.run_episode(EP)
+
+    server.shutdown()
+
+    scene_subs = [s for s in submissions if s["kind"] == "scene"]
+    postmaster_subs = [s for s in submissions if s["kind"] == "postmaster"]
+    kinds_order = [s["kind"] for s in submissions]
+    final_ok = os.path.isfile(os.path.join(wd_output, "EPISODE_FINAL.mp4"))
+
+    if len(scene_subs) == 3 and len(postmaster_subs) == 1 and kinds_order[-1] == "postmaster" and final_ok:
+        ok(f"watchdog orchestration: 3 scenes submitted (not 1), postmaster ran once after all 3 — order={kinds_order}")
+    else:
+        fail("watchdog orchestration",
+             f"scenes={len(scene_subs)} postmaster={len(postmaster_subs)} order={kinds_order} final_ok={final_ok}")
+except Exception as e:
+    import traceback; fail("watchdog orchestration", traceback.format_exc()[-500:])
+
 print(f"\n══════════════════════════════════════")
 print(f"  RESULT: {P} pass / {F} fail")
 print(f"══════════════════════════════════════")

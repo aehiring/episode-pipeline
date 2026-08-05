@@ -87,10 +87,12 @@ for f in $FILES; do
         fi
     fi
 done
-# Also pull watchdog
-if curl -fsSL --connect-timeout 10 --max-time 30 "$CODE_URL/watchdog.py" -o /tmp/_watch.py 2>/dev/null; then
-    python3 -c "import ast; ast.parse(open('/tmp/_watch.py').read())" 2>/dev/null && mv /tmp/_watch.py /opt/pipeline/watchdog.py
-fi
+# Also pull watchdog + its graph-template module (both live in /opt/pipeline, not the node package dir)
+for pf in watchdog.py build_v17_graph.py; do
+    if curl -fsSL --connect-timeout 10 --max-time 30 "$CODE_URL/$pf" -o "/tmp/_pull_$pf" 2>/dev/null; then
+        python3 -c "import ast; ast.parse(open('/tmp/_pull_$pf').read())" 2>/dev/null && mv "/tmp/_pull_$pf" "/opt/pipeline/$pf"
+    fi
+done
 echo "  code pull: $UPDATED updated, $FAILED skipped (baked fallback in use)"
 
 # ── runtime env asserts (loud, before ComfyUI) ──

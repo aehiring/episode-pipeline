@@ -8,9 +8,19 @@ import os, json, re, urllib.request, urllib.error
 
 SCHEMA_PATH = os.environ.get("EPISODE_SCHEMA_PATH", "/opt/pipeline/episode_schema.json")
 API_URL = "https://api.anthropic.com/v1/messages"
+COMPILED_PATH = os.environ.get("EPISODE_COMPILED_PATH", "/models/input/episode_compiled.json")
 
 def _schema():
     with open(SCHEMA_PATH) as f: return json.load(f)
+
+def _write_compiled(ep_json_str):
+    """Atomic handoff to watchdog's scene orchestrator: write-then-rename so a
+    concurrent reader never sees a partial file."""
+    d = os.path.dirname(COMPILED_PATH)
+    if d: os.makedirs(d, exist_ok=True)
+    tmp = COMPILED_PATH + ".tmp"
+    with open(tmp, "w") as f: f.write(ep_json_str)
+    os.replace(tmp, COMPILED_PATH)
 
 def _claude(system, user, max_tokens=16000):
     key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
@@ -82,6 +92,11 @@ class EpisodeCompile:
             raise RuntimeError("EpisodeCompile FATAL: empty input")
         schema = _schema()
 
+        def done(ep, report):
+            ep_json = json.dumps(ep)
+            _write_compiled(ep_json)  # handoff for watchdog's scene orchestrator
+            return (ep_json, report)
+
         # ── PASS-THROUGH: if input is already compiled JSON ──
         stripped = script_text.strip()
         if stripped.startswith('{'):
@@ -89,10 +104,10 @@ class EpisodeCompile:
                 ep = json.loads(stripped)
                 errs = _validate(ep, schema)
                 if not errs:
-                    return (json.dumps(ep), "PASS-THROUGH: valid pre-compiled JSON accepted")
+                    return done(ep, "PASS-THROUGH: valid pre-compiled JSON accepted")
                 # repair once
                 fix_ep = json.loads(stripped)
-                return (json.dumps(fix_ep), f"PASS-THROUGH OK (validator: {len(errs)} minor warnings ignored)")
+                return done(fix_ep, f"PASS-THROUGH OK (validator: {len(errs)} minor warnings ignored)")
             except json.JSONDecodeError as e:
                 raise RuntimeError(f"EpisodeCompile FATAL: input looks like JSON but is invalid: {e}")
 
@@ -104,7 +119,7 @@ class EpisodeCompile:
         ep = _extract_json(out)
         errs = _validate(ep, schema)
         if not errs:
-            return (json.dumps(ep), "COMPILE OK: 0 errors, no repair needed")
+            return done(ep, "COMPILE OK: 0 errors, no repair needed")
 
         # ONE repair pass — lean payload (no bad JSON)
         fix = _claude(_SYS,
@@ -115,7 +130,7 @@ class EpisodeCompile:
         errs2 = _validate(ep2, schema)
         if not errs2:
             rep = "COMPILE OK after 1 repair. AUTO-FIXED " + str(len(errs)) + " errors:\n" + "\n".join(errs[:20])
-            return (json.dumps(ep2), rep)
+            return done(ep2, rep)
 
         raise RuntimeError(
             "EpisodeCompile STOP: validation failed twice. Pipeline halted BEFORE rendering.\n"
