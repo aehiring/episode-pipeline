@@ -93,6 +93,14 @@ for pf in watchdog.py build_v17_graph.py; do
         python3 -c "import ast; ast.parse(open('/tmp/_pull_$pf').read())" 2>/dev/null && mv "/tmp/_pull_$pf" "/opt/pipeline/$pf"
     fi
 done
+# episode_schema.json is the single source of truth (constants, character
+# bible, sfx library) — pull it too so schema tweaks never need a rebuild,
+# same as the code files above (JSON-valid check instead of ast.parse)
+if curl -fsSL --connect-timeout 10 --max-time 30 "$CODE_URL/episode_schema.json" -o /tmp/_pull_schema.json 2>/dev/null; then
+    python3 -c "import json; json.load(open('/tmp/_pull_schema.json'))" 2>/dev/null \
+        && mv /tmp/_pull_schema.json /opt/pipeline/episode_schema.json \
+        || { rm -f /tmp/_pull_schema.json; echo "  skip episode_schema.json (invalid JSON in pull)"; }
+fi
 echo "  code pull: $UPDATED updated, $FAILED skipped (baked fallback in use)"
 
 # ── runtime env asserts (loud, before ComfyUI) ──
