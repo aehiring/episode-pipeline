@@ -75,7 +75,41 @@ to the JSON Schema provided. Compute every derived field yourself: duration_s = 
 start_time_s = running sum, dialogue_word_count = exact whitespace word count,
 totals block recomputed from scenes. characters_used = union of all scene
 characters. Copy dialogue verbatim. keyframe_prompt must contain the style
-anchor string verbatim. motion_prompts array length must equal chunks."""
+anchor string verbatim. motion_prompts array length must equal chunks.
+
+VISUAL QUALITY RULES — these affect what actually renders, follow them exactly:
+
+1. CHARACTER CONSISTENCY: CONSTANTS.character_bible has a fixed visual
+   description for every roster character (hair, clothing, key accessories).
+   Every time a character appears in a keyframe_prompt, include their bible
+   description near their name, in the SAME wording every time they appear
+   anywhere in the episode. The image model regenerates each character from
+   scratch every scene and will drift or swap identities without a repeated,
+   literal description — a bare name is not enough.
+
+2. NARRATOR / speaker=NONE SCENES — NO VISIBLE FACES, EVER: every scene's
+   audio (including narration) is fed into an audio-driven lip-sync model
+   that animates the mouth of ANY clear face present in the keyframe, whether
+   or not that character is the one "speaking". For speaker=NARRATOR or
+   speaker=NONE: keyframe_prompt and motion_prompts must NOT describe any
+   character with a visible, forward-facing mouth. Use establishing/
+   environment shots, characters seen from behind or at a distance,
+   silhouettes, or objects/hands only. Writing "wide shot" alone is not
+   enough — say explicitly "no faces visible", "seen from behind", or
+   "character silhouetted, back to camera".
+
+3. DIALOGUE SCENES — SINGLE-SPEAKER FRAMING: the lip-sync model animates
+   whichever face is most prominent; it cannot target one specific named
+   character in a crowd. So whenever a scene has a real speaker (not
+   NARRATOR/NONE): make that character's face the clearly dominant, front-
+   facing, unobstructed subject (MEDIUM or CLOSE shot). If another character
+   is also present in the same shot, describe them turned away, in profile,
+   or placed in the background — never two characters both front-facing the
+   camera in a scene that has dialogue.
+
+4. Keep prompt language literal and concrete (what is physically visible in
+   frame) rather than abstract mood/emotion words — the image model follows
+   literal visual descriptions far more reliably than tone words alone."""
 
 class EpisodeCompile:
     @classmethod

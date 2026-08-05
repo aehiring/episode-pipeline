@@ -326,6 +326,15 @@
       "COACH NIA",
       "MR PIP"
     ],
+    "character_bible": {
+      "comment": "Fixed visual description per character, taken from the baked ref.png assets. Use the SAME wording every time a character appears in keyframe_prompt so FLUX Kontext doesn't drift their identity scene to scene.",
+      "REN": "girl, ~9yo, medium-brown skin, dark maroon curly hair in two pigtails with teal hair ties, big brown eyes, freckles across nose and cheeks, coral-pink t-shirt, teal leggings with yellow side stripe, cream sneakers",
+      "REED": "boy, ~10yo, brown skin, black curly hair under a backwards mustard-yellow cap, cream t-shirt printed with number 10 and a teal lanyard holding a yellow stopwatch, dark teal cargo shorts, coral-pink sneakers",
+      "MUM": "woman, medium-brown skin, voluminous black curly shoulder-length hair, gold hoop earrings, cream wrap-style top, dark teal wide-leg pants, warm gentle smile",
+      "DAD": "man, light skin, short ginger hair, round brown glasses, rosy cheeks, light stubble, stocky build, rust-orange zip-up tracksuit jacket and matching pants, mismatched striped socks, orange sneakers",
+      "COACH NIA": "woman, tan skin, dark hair in a high ponytail with a pink headband, athletic build, teal tank top and leggings with coral piping, gold whistle on wrist",
+      "MR PIP": "elderly man, tan skin, bald with white hair on the sides, bushy white mustache, round friendly face, pencil tucked behind ear, teal polo shirt under a beige work apron with a tool pocket, teal pants, brown work shoes"
+    },
     "sfx_library": [
       "door_knock",
       "door_open",
