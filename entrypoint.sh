@@ -125,5 +125,5 @@ echo "$SCHED" > /models/episode_state/scheduler.txt
 
 echo "== starting watchdog =="
 python3 /opt/pipeline/watchdog.py &
-echo "== v17 ready =="
+echo "== v18 ready =="
 wait "$COMFY_PID"
