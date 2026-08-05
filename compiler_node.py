@@ -85,7 +85,11 @@ class EpisodeCompile:
     RETURN_NAMES = ("episode_json", "compile_report")
     FUNCTION = "compile"
     CATEGORY = "RenReed"
-    OUTPUT_NODE = False
+    OUTPUT_NODE = True  # the trigger workflow has no downstream nodes anymore
+                        # (watchdog does everything else via separate /prompt
+                        # calls) — ComfyUI refuses to run a prompt with no
+                        # output node at all ("prompt_no_outputs"), so this
+                        # node itself has to be the one
 
     def compile(self, script_text):
         if not script_text.strip():
