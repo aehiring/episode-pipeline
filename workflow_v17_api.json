@@ -1,0 +1,1128 @@
+{
+ "1": {
+  "inputs": {
+   "text": "{\"schema_version\":\"1.0\",\"episode\":{\"title\":\"Reeds One Plan\",\"logline\":\"Reed had one plan today.\",\"lesson\":\"Asking for help makes things easier.\",\"total_chunks\":5,\"scene_count\":3,\"characters_used\":[\"REN\",\"REED\"]},\"scenes\":[{\"scene_number\":1,\"chunks\":2,\"duration_s\":9.625,\"start_time_s\":0.0,\"location\":\"HALLWAY\",\"time_of_day\":\"DAY\",\"characters\":[\"REED\"],\"speaker\":\"NARRATOR\",\"wardrobe\":{\"carry\":true},\"shot\":\"WIDE\",\"keyframe_prompt\":\"3D animated cartoon, Pixar-style, soft rounded shapes, warm colors, gentle lighting, family-friendly. HALLWAY from above, rows of lockers, warm lights, wide shot.\",\"motion_prompts\":[\"Camera drifts along the hallway slowly.\",\"Sunlight streams through a far window.\"],\"dialogue\":\"Reed had one plan. It was already falling apart.\",\"dialogue_word_count\":9,\"sfx\":[{\"name\":\"footsteps_floor\",\"at_s\":2.0}]},{\"scene_number\":2,\"chunks\":2,\"duration_s\":9.625,\"start_time_s\":9.625,\"location\":\"HALLWAY\",\"time_of_day\":\"DAY\",\"characters\":[\"REED\"],\"speaker\":\"REED\",\"wardrobe\":{\"carry\":true},\"shot\":\"MEDIUM\",\"keyframe_prompt\":\"3D animated cartoon, Pixar-style, soft rounded shapes, warm colors, gentle lighting, family-friendly. HALLWAY, REED stands at locker, wide eyes, nervous smile, medium shot.\",\"motion_prompts\":[\"REED opens his locker quietly.\",\"REED closes locker and nods.\"],\"dialogue\":\"Stay calm. Find Ren. Tell her the plan. Simple. Easy.\",\"dialogue_word_count\":10,\"sfx\":[{\"name\":\"school_bell\",\"at_s\":4.0}]},{\"scene_number\":3,\"chunks\":1,\"duration_s\":4.8125,\"start_time_s\":19.25,\"location\":\"HALLWAY\",\"time_of_day\":\"DAY\",\"characters\":[\"REN\",\"REED\"],\"speaker\":\"REN\",\"wardrobe\":{\"carry\":true},\"shot\":\"MEDIUM\",\"keyframe_prompt\":\"3D animated cartoon, Pixar-style, soft rounded shapes, warm colors, gentle lighting, family-friendly. HALLWAY, REN stands behind REED, calm, medium shot.\",\"motion_prompts\":[\"REED turns slowly to find REN standing behind him.\"],\"dialogue\":\"Reed. We missed the bus.\",\"dialogue_word_count\":5,\"sfx\":[{\"name\":\"gasp\",\"at_s\":2.0}]}],\"totals\":{\"sum_chunks\":5,\"sum_duration_s\":24.0625,\"total_frames_16fps\":385}}"
+  },
+  "class_type": "Text Multiline",
+  "_meta": {
+   "title": "EPISODE JSON (paste compiled JSON here)"
+  }
+ },
+ "3": {
+  "inputs": {
+   "episode_json": [
+    "64",
+    0
+   ]
+  },
+  "class_type": "SceneCount",
+  "_meta": {
+   "title": "Scene count"
+  }
+ },
+ "4": {
+  "inputs": {
+   "episode_json": [
+    "64",
+    0
+   ]
+  },
+  "class_type": "CharacterRefLoader",
+  "_meta": {
+   "title": "Character refs"
+  }
+ },
+ "5": {
+  "inputs": {
+   "unet_name": "wan2.2_s2v_14B_fp8_scaled.safetensors",
+   "weight_dtype": "default"
+  },
+  "class_type": "UNETLoader",
+  "_meta": {
+   "title": "S2V UNET"
+  }
+ },
+ "6": {
+  "inputs": {
+   "model": [
+    "5",
+    0
+   ],
+   "lora_name": "wan22_lightning_fallback_high.safetensors",
+   "strength_model": 1.5
+  },
+  "class_type": "LoraLoaderModelOnly",
+  "_meta": {
+   "title": "LoRA 1.5"
+  }
+ },
+ "7": {
+  "inputs": {
+   "model": [
+    "6",
+    0
+   ],
+   "shift": 8.0
+  },
+  "class_type": "ModelSamplingSD3",
+  "_meta": {
+   "title": "Shift 8"
+  }
+ },
+ "8": {
+  "inputs": {
+   "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+   "type": "wan",
+   "device": "default"
+  },
+  "class_type": "CLIPLoader",
+  "_meta": {
+   "title": "Wan CLIP"
+  }
+ },
+ "9": {
+  "inputs": {
+   "vae_name": "wan_2.1_vae.safetensors"
+  },
+  "class_type": "VAELoader",
+  "_meta": {
+   "title": "Wan VAE"
+  }
+ },
+ "10": {
+  "inputs": {
+   "audio_encoder_name": "wav2vec2_large_english_fp16.safetensors"
+  },
+  "class_type": "AudioEncoderLoader",
+  "_meta": {
+   "title": "wav2vec2"
+  }
+ },
+ "11": {
+  "inputs": {
+   "unet_name": "flux1-dev-kontext_fp8_scaled.safetensors",
+   "weight_dtype": "default"
+  },
+  "class_type": "UNETLoader",
+  "_meta": {
+   "title": "Kontext UNET"
+  }
+ },
+ "12": {
+  "inputs": {
+   "clip_name1": "clip_l.safetensors",
+   "clip_name2": "t5xxl_fp8_e4m3fn_scaled.safetensors",
+   "type": "flux",
+   "device": "default"
+  },
+  "class_type": "DualCLIPLoader",
+  "_meta": {
+   "title": "FLUX CLIP"
+  }
+ },
+ "13": {
+  "inputs": {
+   "vae_name": "ae.safetensors"
+  },
+  "class_type": "VAELoader",
+  "_meta": {
+   "title": "FLUX VAE"
+  }
+ },
+ "14": {
+  "inputs": {
+   "clip": [
+    "8",
+    0
+   ],
+   "text": "blurry, static, frozen, jerky motion, deformed hands, text, watermark"
+  },
+  "class_type": "CLIPTextEncode",
+  "_meta": {
+   "title": "Wan neg"
+  }
+ },
+ "15": {
+  "inputs": {
+   "clip": [
+    "12",
+    0
+   ],
+   "text": ""
+  },
+  "class_type": "CLIPTextEncode",
+  "_meta": {
+   "title": "Kontext neg"
+  }
+ },
+ "16": {
+  "inputs": {
+   "image1": [
+    "4",
+    0
+   ],
+   "direction": "right",
+   "match_image_size": true,
+   "spacing_width": 0,
+   "spacing_color": "white"
+  },
+  "class_type": "ImageStitch",
+  "_meta": {
+   "title": "Char sheet"
+  }
+ },
+ "17": {
+  "inputs": {
+   "value": 1
+  },
+  "class_type": "PrimitiveInt",
+  "_meta": {
+   "title": "const 1"
+  }
+ },
+ "18": {
+  "inputs": {
+   "episode_json": [
+    "64",
+    0
+   ],
+   "scene_number": [
+    "17",
+    0
+   ],
+   "field": "keyframe_prompt"
+  },
+  "class_type": "SceneField",
+  "_meta": {
+   "title": "KF1 prompt"
+  }
+ },
+ "19": {
+  "inputs": {
+   "clip": [
+    "12",
+    0
+   ],
+   "text": [
+    "18",
+    0
+   ]
+  },
+  "class_type": "CLIPTextEncode",
+  "_meta": {
+   "title": "Kontext pos 1"
+  }
+ },
+ "20": {
+  "inputs": {
+   "pixels": [
+    "16",
+    0
+   ],
+   "vae": [
+    "13",
+    0
+   ]
+  },
+  "class_type": "VAEEncode",
+  "_meta": {
+   "title": "sheet->lat"
+  }
+ },
+ "21": {
+  "inputs": {
+   "conditioning": [
+    "19",
+    0
+   ],
+   "latent": [
+    "20",
+    0
+   ]
+  },
+  "class_type": "ReferenceLatent",
+  "_meta": {
+   "title": "ref sheet"
+  }
+ },
+ "22": {
+  "inputs": {
+   "conditioning": [
+    "21",
+    0
+   ],
+   "guidance": 2.5
+  },
+  "class_type": "FluxGuidance",
+  "_meta": {
+   "title": "guide 2.5"
+  }
+ },
+ "23": {
+  "inputs": {
+   "width": 1280,
+   "height": 720,
+   "batch_size": 1
+  },
+  "class_type": "EmptySD3LatentImage",
+  "_meta": {
+   "title": "canvas 720p"
+  }
+ },
+ "24": {
+  "inputs": {
+   "model": [
+    "11",
+    0
+   ],
+   "positive": [
+    "22",
+    0
+   ],
+   "negative": [
+    "15",
+    0
+   ],
+   "latent_image": [
+    "23",
+    0
+   ],
+   "seed": 7,
+   "control_after_generate": "fixed",
+   "steps": 20,
+   "cfg": 1.0,
+   "sampler_name": "euler",
+   "scheduler": "simple",
+   "denoise": 1.0
+  },
+  "class_type": "KSampler",
+  "_meta": {
+   "title": "anchor sample"
+  }
+ },
+ "25": {
+  "inputs": {
+   "samples": [
+    "24",
+    0
+   ],
+   "vae": [
+    "13",
+    0
+   ]
+  },
+  "class_type": "VAEDecode",
+  "_meta": {
+   "title": "ANCHOR"
+  }
+ },
+ "26": {
+  "inputs": {
+   "pixels": [
+    "25",
+    0
+   ],
+   "vae": [
+    "13",
+    0
+   ]
+  },
+  "class_type": "VAEEncode",
+  "_meta": {
+   "title": "anchor->lat"
+  }
+ },
+ "27": {
+  "inputs": {
+   "value": 0
+  },
+  "class_type": "PrimitiveInt",
+  "_meta": {
+   "title": "idx0"
+  }
+ },
+ "28": {
+  "inputs": {
+   "condition": true,
+   "initial_value0": [
+    "27",
+    0
+   ]
+  },
+  "class_type": "easy whileLoopStart",
+  "_meta": {
+   "title": "WHILE start"
+  }
+ },
+ "29": {
+  "inputs": {
+   "expression": "a+1",
+   "a": [
+    "28",
+    1
+   ]
+  },
+  "class_type": "MathExpression|pysssss",
+  "_meta": {
+   "title": "scene_number"
+  }
+ },
+ "30": {
+  "inputs": {
+   "episode_json": [
+    "64",
+    0
+   ],
+   "scene_number": [
+    "29",
+    0
+   ],
+   "field": "keyframe_prompt"
+  },
+  "class_type": "SceneField",
+  "_meta": {
+   "title": "KF prompt"
+  }
+ },
+ "31": {
+  "inputs": {
+   "clip": [
+    "12",
+    0
+   ],
+   "text": [
+    "30",
+    0
+   ]
+  },
+  "class_type": "CLIPTextEncode",
+  "_meta": {
+   "title": "Kontext pos N"
+  }
+ },
+ "32": {
+  "inputs": {
+   "conditioning": [
+    "31",
+    0
+   ],
+   "latent": [
+    "26",
+    0
+   ]
+  },
+  "class_type": "ReferenceLatent",
+  "_meta": {
+   "title": "ref ANCHOR"
+  }
+ },
+ "33": {
+  "inputs": {
+   "conditioning": [
+    "32",
+    0
+   ],
+   "guidance": 2.5
+  },
+  "class_type": "FluxGuidance",
+  "_meta": {
+   "title": "guide 2.5"
+  }
+ },
+ "34": {
+  "inputs": {
+   "model": [
+    "11",
+    0
+   ],
+   "positive": [
+    "33",
+    0
+   ],
+   "negative": [
+    "15",
+    0
+   ],
+   "latent_image": [
+    "23",
+    0
+   ],
+   "seed": 7,
+   "control_after_generate": "fixed",
+   "steps": 20,
+   "cfg": 1.0,
+   "sampler_name": "euler",
+   "scheduler": "simple",
+   "denoise": 1.0
+  },
+  "class_type": "KSampler",
+  "_meta": {
+   "title": "KF sample"
+  }
+ },
+ "35": {
+  "inputs": {
+   "samples": [
+    "34",
+    0
+   ],
+   "vae": [
+    "13",
+    0
+   ]
+  },
+  "class_type": "VAEDecode",
+  "_meta": {
+   "title": "KF image"
+  }
+ },
+ "36": {
+  "inputs": {
+   "image": [
+    "35",
+    0
+   ],
+   "upscale_method": "lanczos",
+   "width": 832,
+   "height": 480,
+   "crop": "center"
+  },
+  "class_type": "ImageScale",
+  "_meta": {
+   "title": "->832x480"
+  }
+ },
+ "37": {
+  "inputs": {
+   "episode_json": [
+    "64",
+    0
+   ],
+   "scene_number": [
+    "29",
+    0
+   ]
+  },
+  "class_type": "RenReedTTS",
+  "_meta": {
+   "title": "TTS (loud)"
+  }
+ },
+ "38": {
+  "inputs": {
+   "audio_encoder": [
+    "10",
+    0
+   ],
+   "audio": [
+    "37",
+    0
+   ]
+  },
+  "class_type": "AudioEncoderEncode",
+  "_meta": {
+   "title": "audio embed"
+  }
+ },
+ "39": {
+  "inputs": {
+   "episode_json": [
+    "64",
+    0
+   ],
+   "scene_number": [
+    "29",
+    0
+   ],
+   "field": "motion_all"
+  },
+  "class_type": "SceneField",
+  "_meta": {
+   "title": "motion text"
+  }
+ },
+ "40": {
+  "inputs": {
+   "clip": [
+    "8",
+    0
+   ],
+   "text": [
+    "39",
+    0
+   ]
+  },
+  "class_type": "CLIPTextEncode",
+  "_meta": {
+   "title": "Wan pos"
+  }
+ },
+ "41": {
+  "inputs": {
+   "positive": [
+    "40",
+    0
+   ],
+   "negative": [
+    "14",
+    0
+   ],
+   "vae": [
+    "9",
+    0
+   ],
+   "width": 832,
+   "height": 480,
+   "length": 77,
+   "batch_size": 1,
+   "audio_encoder_output": [
+    "38",
+    0
+   ],
+   "ref_image": [
+    "36",
+    0
+   ]
+  },
+  "class_type": "WanSoundImageToVideo",
+  "_meta": {
+   "title": "S2V init"
+  }
+ },
+ "42": {
+  "inputs": {
+   "model": [
+    "7",
+    0
+   ],
+   "add_noise": "enable",
+   "noise_seed": 3,
+   "control_after_generate": "fixed",
+   "steps": 4,
+   "cfg": 1.0,
+   "sampler_name": "euler",
+   "scheduler": "beta",
+   "positive": [
+    "41",
+    0
+   ],
+   "negative": [
+    "41",
+    1
+   ],
+   "latent_image": [
+    "41",
+    2
+   ],
+   "start_at_step": 0,
+   "end_at_step": 10000,
+   "return_with_leftover_noise": "disable"
+  },
+  "class_type": "KSamplerAdvanced",
+  "_meta": {
+   "title": "KSA c1"
+  }
+ },
+ "43": {
+  "inputs": {
+   "positive": [
+    "40",
+    0
+   ],
+   "negative": [
+    "14",
+    0
+   ],
+   "vae": [
+    "9",
+    0
+   ],
+   "length": 77,
+   "video_latent": [
+    "42",
+    0
+   ],
+   "audio_encoder_output": [
+    "38",
+    0
+   ],
+   "ref_image": [
+    "36",
+    0
+   ]
+  },
+  "class_type": "WanSoundImageToVideoExtend",
+  "_meta": {
+   "title": "S2V ext2"
+  }
+ },
+ "44": {
+  "inputs": {
+   "model": [
+    "7",
+    0
+   ],
+   "add_noise": "enable",
+   "noise_seed": 3,
+   "control_after_generate": "fixed",
+   "steps": 4,
+   "cfg": 1.0,
+   "sampler_name": "euler",
+   "scheduler": "beta",
+   "positive": [
+    "43",
+    0
+   ],
+   "negative": [
+    "43",
+    1
+   ],
+   "latent_image": [
+    "43",
+    2
+   ],
+   "start_at_step": 0,
+   "end_at_step": 10000,
+   "return_with_leftover_noise": "disable"
+  },
+  "class_type": "KSamplerAdvanced",
+  "_meta": {
+   "title": "KSA c2"
+  }
+ },
+ "45": {
+  "inputs": {
+   "samples1": [
+    "42",
+    0
+   ],
+   "samples2": [
+    "44",
+    0
+   ],
+   "dim": "t"
+  },
+  "class_type": "LatentConcat",
+  "_meta": {
+   "title": "acc2"
+  }
+ },
+ "46": {
+  "inputs": {
+   "positive": [
+    "40",
+    0
+   ],
+   "negative": [
+    "14",
+    0
+   ],
+   "vae": [
+    "9",
+    0
+   ],
+   "length": 77,
+   "video_latent": [
+    "45",
+    0
+   ],
+   "audio_encoder_output": [
+    "38",
+    0
+   ],
+   "ref_image": [
+    "36",
+    0
+   ]
+  },
+  "class_type": "WanSoundImageToVideoExtend",
+  "_meta": {
+   "title": "S2V ext3"
+  }
+ },
+ "47": {
+  "inputs": {
+   "model": [
+    "7",
+    0
+   ],
+   "add_noise": "enable",
+   "noise_seed": 3,
+   "control_after_generate": "fixed",
+   "steps": 4,
+   "cfg": 1.0,
+   "sampler_name": "euler",
+   "scheduler": "beta",
+   "positive": [
+    "46",
+    0
+   ],
+   "negative": [
+    "46",
+    1
+   ],
+   "latent_image": [
+    "46",
+    2
+   ],
+   "start_at_step": 0,
+   "end_at_step": 10000,
+   "return_with_leftover_noise": "disable"
+  },
+  "class_type": "KSamplerAdvanced",
+  "_meta": {
+   "title": "KSA c3"
+  }
+ },
+ "48": {
+  "inputs": {
+   "samples1": [
+    "45",
+    0
+   ],
+   "samples2": [
+    "47",
+    0
+   ],
+   "dim": "t"
+  },
+  "class_type": "LatentConcat",
+  "_meta": {
+   "title": "acc3"
+  }
+ },
+ "49": {
+  "inputs": {
+   "positive": [
+    "40",
+    0
+   ],
+   "negative": [
+    "14",
+    0
+   ],
+   "vae": [
+    "9",
+    0
+   ],
+   "length": 77,
+   "video_latent": [
+    "48",
+    0
+   ],
+   "audio_encoder_output": [
+    "38",
+    0
+   ],
+   "ref_image": [
+    "36",
+    0
+   ]
+  },
+  "class_type": "WanSoundImageToVideoExtend",
+  "_meta": {
+   "title": "S2V ext4"
+  }
+ },
+ "50": {
+  "inputs": {
+   "model": [
+    "7",
+    0
+   ],
+   "add_noise": "enable",
+   "noise_seed": 3,
+   "control_after_generate": "fixed",
+   "steps": 4,
+   "cfg": 1.0,
+   "sampler_name": "euler",
+   "scheduler": "beta",
+   "positive": [
+    "49",
+    0
+   ],
+   "negative": [
+    "49",
+    1
+   ],
+   "latent_image": [
+    "49",
+    2
+   ],
+   "start_at_step": 0,
+   "end_at_step": 10000,
+   "return_with_leftover_noise": "disable"
+  },
+  "class_type": "KSamplerAdvanced",
+  "_meta": {
+   "title": "KSA c4"
+  }
+ },
+ "51": {
+  "inputs": {
+   "samples1": [
+    "48",
+    0
+   ],
+   "samples2": [
+    "50",
+    0
+   ],
+   "dim": "t"
+  },
+  "class_type": "LatentConcat",
+  "_meta": {
+   "title": "acc4"
+  }
+ },
+ "52": {
+  "inputs": {
+   "positive": [
+    "40",
+    0
+   ],
+   "negative": [
+    "14",
+    0
+   ],
+   "vae": [
+    "9",
+    0
+   ],
+   "length": 77,
+   "video_latent": [
+    "51",
+    0
+   ],
+   "audio_encoder_output": [
+    "38",
+    0
+   ],
+   "ref_image": [
+    "36",
+    0
+   ]
+  },
+  "class_type": "WanSoundImageToVideoExtend",
+  "_meta": {
+   "title": "S2V ext5"
+  }
+ },
+ "53": {
+  "inputs": {
+   "model": [
+    "7",
+    0
+   ],
+   "add_noise": "enable",
+   "noise_seed": 3,
+   "control_after_generate": "fixed",
+   "steps": 4,
+   "cfg": 1.0,
+   "sampler_name": "euler",
+   "scheduler": "beta",
+   "positive": [
+    "52",
+    0
+   ],
+   "negative": [
+    "52",
+    1
+   ],
+   "latent_image": [
+    "52",
+    2
+   ],
+   "start_at_step": 0,
+   "end_at_step": 10000,
+   "return_with_leftover_noise": "disable"
+  },
+  "class_type": "KSamplerAdvanced",
+  "_meta": {
+   "title": "KSA c5"
+  }
+ },
+ "54": {
+  "inputs": {
+   "samples1": [
+    "51",
+    0
+   ],
+   "samples2": [
+    "53",
+    0
+   ],
+   "dim": "t"
+  },
+  "class_type": "LatentConcat",
+  "_meta": {
+   "title": "acc5"
+  }
+ },
+ "55": {
+  "inputs": {
+   "samples": [
+    "54",
+    0
+   ],
+   "vae": [
+    "9",
+    0
+   ]
+  },
+  "class_type": "VAEDecode",
+  "_meta": {
+   "title": "decode 385f"
+  }
+ },
+ "56": {
+  "inputs": {
+   "image": [
+    "55",
+    0
+   ],
+   "batch_index": 1,
+   "length": 1
+  },
+  "class_type": "ImageFromBatch",
+  "_meta": {
+   "title": "frame1"
+  }
+ },
+ "57": {
+  "inputs": {
+   "image": [
+    "55",
+    0
+   ],
+   "batch_index": 1,
+   "length": 384
+  },
+  "class_type": "ImageFromBatch",
+  "_meta": {
+   "title": "f1..384"
+  }
+ },
+ "58": {
+  "inputs": {
+   "image1": [
+    "56",
+    0
+   ],
+   "image2": [
+    "57",
+    0
+   ]
+  },
+  "class_type": "ImageBatch",
+  "_meta": {
+   "title": "fixed 385"
+  }
+ },
+ "59": {
+  "inputs": {
+   "frame_rate": 16,
+   "loop_count": 0,
+   "filename_prefix": "scenes/scene",
+   "format": "video/h264-mp4",
+   "pix_fmt": "yuv420p",
+   "crf": 17,
+   "save_metadata": false,
+   "trim_to_audio": true,
+   "pingpong": false,
+   "save_output": true,
+   "images": [
+    "58",
+    0
+   ],
+   "audio": [
+    "37",
+    0
+   ]
+  },
+  "class_type": "VHS_VideoCombine",
+  "_meta": {
+   "title": "save scene 16fps"
+  }
+ },
+ "60": {
+  "inputs": {
+   "a_value": "",
+   "b_value": "",
+   "operator": "<",
+   "a": [
+    "29",
+    0
+   ],
+   "b": [
+    "3",
+    0
+   ]
+  },
+  "class_type": "LayerUtility: BooleanOperatorV2",
+  "_meta": {
+   "title": "scene<count"
+  }
+ },
+ "61": {
+  "inputs": {
+   "flow": [
+    "28",
+    0
+   ],
+   "condition": [
+    "60",
+    0
+   ],
+   "initial_value0": [
+    "29",
+    0
+   ]
+  },
+  "class_type": "easy whileLoopEnd",
+  "_meta": {
+   "title": "WHILE end"
+  }
+ },
+ "62": {
+  "inputs": {
+   "path": "/opt/ComfyUI/output/scenes",
+   "after": [
+    "61",
+    0
+   ]
+  },
+  "class_type": "PathAfter",
+  "_meta": {
+   "title": "gate: after loop"
+  }
+ },
+ "63": {
+  "inputs": {
+   "episode_video_path": [
+    "62",
+    0
+   ],
+   "episode_json": [
+    "64",
+    0
+   ]
+  },
+  "class_type": "EpisodePostMaster",
+  "_meta": {
+   "title": "FINAL PostMaster"
+  }
+ },
+ "64": {
+  "inputs": {
+   "script_text": [
+    "1",
+    0
+   ]
+  },
+  "class_type": "EpisodeCompile",
+  "_meta": {
+   "title": "Compile / JSON pass-through"
+  }
+ }
+}

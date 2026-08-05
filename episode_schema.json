@@ -1,0 +1,379 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "ren-reed-episode-v1",
+  "title": "Ren & Reed Compiled Episode v1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "episode",
+    "scenes",
+    "totals"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "episode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "logline",
+        "lesson",
+        "total_chunks",
+        "scene_count",
+        "characters_used"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 90
+        },
+        "logline": {
+          "type": "string",
+          "minLength": 1
+        },
+        "lesson": {
+          "type": "string",
+          "minLength": 1
+        },
+        "total_chunks": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "scene_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "characters_used": {
+          "description": "CONSUMER: Docker character loader \u2014 loads ONLY these from /opt/pipeline/assets/characters/<NAME>/",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "REN",
+              "REED",
+              "MUM",
+              "DAD",
+              "COACH NIA",
+              "MR PIP"
+            ]
+          }
+        }
+      }
+    },
+    "scenes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "scene_number",
+          "chunks",
+          "duration_s",
+          "start_time_s",
+          "location",
+          "time_of_day",
+          "characters",
+          "speaker",
+          "wardrobe",
+          "shot",
+          "keyframe_prompt",
+          "motion_prompts",
+          "dialogue",
+          "dialogue_word_count",
+          "sfx"
+        ],
+        "properties": {
+          "scene_number": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 112
+          },
+          "chunks": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "duration_s": {
+            "description": "MUST equal chunks*4.8125 \u2014 Validator recomputes",
+            "type": "number"
+          },
+          "start_time_s": {
+            "description": "Running offset in final episode \u2014 CONSUMER: SFX mux global timeline",
+            "type": "number",
+            "minimum": 0
+          },
+          "location": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Verbatim-consistent string across scenes (V11)"
+          },
+          "time_of_day": {
+            "enum": [
+              "DAY",
+              "EVENING",
+              "NIGHT",
+              "INDOOR"
+            ]
+          },
+          "characters": {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 3,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "REN",
+                "REED",
+                "MUM",
+                "DAD",
+                "COACH NIA",
+                "MR PIP"
+              ]
+            }
+          },
+          "speaker": {
+            "enum": [
+              "REN",
+              "REED",
+              "MUM",
+              "DAD",
+              "COACH NIA",
+              "MR PIP",
+              "NARRATOR",
+              "NONE"
+            ]
+          },
+          "wardrobe": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "carry"
+            ],
+            "properties": {
+              "carry": {
+                "type": "boolean"
+              },
+              "changes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "character",
+                    "item"
+                  ],
+                  "properties": {
+                    "character": {
+                      "enum": [
+                        "REN",
+                        "REED",
+                        "MUM",
+                        "DAD",
+                        "COACH NIA",
+                        "MR PIP"
+                      ]
+                    },
+                    "item": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "shot": {
+            "enum": [
+              "WIDE",
+              "MEDIUM",
+              "CLOSE"
+            ]
+          },
+          "keyframe_prompt": {
+            "description": "CONSUMER: FLUX Kontext. MUST contain style anchor verbatim (V12). Built from anchor + character refs, never previous scene frame.",
+            "type": "string",
+            "minLength": 40
+          },
+          "motion_prompts": {
+            "description": "CONSUMER: S2V extend chain \u2014 array length MUST equal chunks (V4). Index i = chunk i.",
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 5,
+            "items": {
+              "type": "string",
+              "minLength": 10
+            }
+          },
+          "dialogue": {
+            "description": "CONSUMER: ElevenLabs TTS. Plain speech only. 'NONE' when speaker=NONE.",
+            "type": "string"
+          },
+          "dialogue_word_count": {
+            "description": "Pre-counted by compiler; Validator recounts and must match AND be <= budget[chunks] (V6)",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 48
+          },
+          "sfx": {
+            "description": "CONSUMER: PostMaster mux from /opt/pipeline/assets/sfx/ \u2014 NEVER enters S2V audio (spec #10)",
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "at_s"
+              ],
+              "properties": {
+                "name": {
+                  "enum": [
+                    "door_knock",
+                    "door_open",
+                    "door_close",
+                    "footsteps_grass",
+                    "footsteps_floor",
+                    "dog_bark",
+                    "cat_meow",
+                    "birds_chirp",
+                    "wind_soft",
+                    "rain_light",
+                    "thunder_soft",
+                    "water_splash",
+                    "ball_bounce",
+                    "bicycle_bell",
+                    "school_bell",
+                    "phone_chime",
+                    "pop",
+                    "whoosh",
+                    "sparkle",
+                    "magic_chime",
+                    "crowd_kids_laugh",
+                    "yawn",
+                    "giggle",
+                    "gasp",
+                    "boing",
+                    "thud_soft",
+                    "paper_rustle",
+                    "zip",
+                    "car_pass_soft",
+                    "kitchen_sizzle"
+                  ]
+                },
+                "at_s": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "totals": {
+      "description": "Compiler-computed cross-checks \u2014 Validator recomputes every one (V3)",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sum_chunks",
+        "sum_duration_s",
+        "total_frames_16fps"
+      ],
+      "properties": {
+        "sum_chunks": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sum_duration_s": {
+          "type": "number",
+          "minimum": 0.1
+        },
+        "total_frames_16fps": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  },
+  "x_constants": {
+    "comment": "Machine-readable mirror of locked constants \u2014 Validator imports these, never hardcodes",
+    "chunk_frames": 77,
+    "fps_native": 16,
+    "chunk_seconds": 4.8125,
+    "min_chunks": 100,
+    "max_chunks": 112,
+    "word_budget": {
+      "1": 8,
+      "2": 19,
+      "3": 29,
+      "4": 38,
+      "5": 48
+    },
+    "style_anchor": "3D animated cartoon, Pixar-style, soft rounded shapes, warm colors, gentle lighting, family-friendly",
+    "roster": [
+      "REN",
+      "REED",
+      "MUM",
+      "DAD",
+      "COACH NIA",
+      "MR PIP"
+    ],
+    "sfx_library": [
+      "door_knock",
+      "door_open",
+      "door_close",
+      "footsteps_grass",
+      "footsteps_floor",
+      "dog_bark",
+      "cat_meow",
+      "birds_chirp",
+      "wind_soft",
+      "rain_light",
+      "thunder_soft",
+      "water_splash",
+      "ball_bounce",
+      "bicycle_bell",
+      "school_bell",
+      "phone_chime",
+      "pop",
+      "whoosh",
+      "sparkle",
+      "magic_chime",
+      "crowd_kids_laugh",
+      "yawn",
+      "giggle",
+      "gasp",
+      "boing",
+      "thud_soft",
+      "paper_rustle",
+      "zip",
+      "car_pass_soft",
+      "kitchen_sizzle"
+    ],
+    "render": {
+      "width": 832,
+      "height": 480
+    },
+    "delivery": {
+      "width": 1280,
+      "height": 720,
+      "fps": 24
+    },
+    "assets": {
+      "characters_dir": "/opt/pipeline/assets/characters",
+      "sfx_dir": "/opt/pipeline/assets/sfx",
+      "audio_out_dir": "/models/input/episode_audio",
+      "schema_path": "/opt/pipeline/episode_schema.json",
+      "scenes_out_dir": "/models/output/scenes",
+      "final_out_name": "EPISODE_FINAL.mp4"
+    }
+  }
+}
