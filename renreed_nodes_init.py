@@ -31,10 +31,46 @@ def _patch_torchaudio_save():
     torchaudio.save = _safe_save
 
 
+# Same story, second call: ComfyUI-LatentSyncWrapper also calls
+# torchvision.io.write_video(...) (nodes.py line 575) to write a temp video
+# from the raw frames — this torchvision build has REMOVED write_video
+# entirely ("module 'torchvision.io' has no attribute 'write_video'", found
+# live 2026-08-06, right after the torchaudio.save patch cleared the
+# previous failure). Same fix shape: provide/replace it with a direct
+# ffmpeg encode of the raw RGB frames.
+def _patch_torchvision_write_video():
+    import torchvision.io as tvio
+    _orig_write_video = getattr(tvio, "write_video", None)
+
+    def _safe_write_video(filename, video_array, fps, video_codec="libx264", **kw):
+        if _orig_write_video is not None:
+            try:
+                return _orig_write_video(filename, video_array, fps, video_codec=video_codec, **kw)
+            except Exception as e:
+                print(f"  [RenReed] torchvision.io.write_video fell back to ffmpeg ({e})")
+        import numpy as np, subprocess
+        arr = video_array.detach().cpu().numpy() if hasattr(video_array, "detach") else video_array
+        arr = arr.astype(np.uint8)
+        t, h, w, c = arr.shape
+        r = subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
+                            "-s", f"{w}x{h}", "-r", str(fps), "-i", "pipe:0",
+                            "-c:v", "libx264", "-pix_fmt", "yuv420p", str(filename)],
+                           input=arr.tobytes(), capture_output=True)
+        if r.returncode != 0:
+            raise RuntimeError(f"ffmpeg write_video fallback also failed: {r.stderr.decode()[:300]}")
+
+    tvio.write_video = _safe_write_video
+
+
 try:
     _patch_torchaudio_save()
 except Exception as _e:
     print(f"  [RenReed] torchaudio.save patch skipped: {_e}")
+
+try:
+    _patch_torchvision_write_video()
+except Exception as _e:
+    print(f"  [RenReed] torchvision.io.write_video patch skipped: {_e}")
 
 from .compiler_node import NODE_CLASS_MAPPINGS as A, NODE_DISPLAY_NAME_MAPPINGS as AD
 from .character_loader_node import NODE_CLASS_MAPPINGS as B, NODE_DISPLAY_NAME_MAPPINGS as BD
