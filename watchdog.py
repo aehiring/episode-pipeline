@@ -404,30 +404,46 @@ JAMENDO_API = "https://api.jamendo.com/v3.0/tracks/"
 
 
 def _jamendo_search(client_id, **params):
-    q = urllib.parse.urlencode({"client_id": client_id, "format": "json", "limit": 5,
+    q = urllib.parse.urlencode({"client_id": client_id, "format": "json", "limit": 10,
         "vocalinstrumental": "instrumental", "order": "popularity_total", "audioformat": "mp31", **params})
     with urllib.request.urlopen(f"{JAMENDO_API}?{q}", timeout=30) as r:
         return json.loads(r.read().decode()).get("results", [])
+
+
+def _commercial_use_ok(track):
+    """The Ren & Reed channel is monetized, so a track licensed
+    non-commercial-only (Creative Commons "nc" variants — by-nc, by-nc-sa,
+    by-nc-nd) is NOT usable, even though Jamendo's API is free to query
+    regardless of license. Filtering client-side on license_ccurl rather
+    than relying on the API's ccnc/ccsa/ccnd boolean params, whose exact
+    include/exclude semantics aren't clearly documented — a plain substring
+    check against the actual returned license URL is unambiguous."""
+    url = (track.get("license_ccurl") or "").lower()
+    return bool(url) and "-nc-" not in url and not url.rstrip("/").endswith("-nc")
 
 
 def _jamendo_music(ep):
     """Real royalty-free track, queried by THIS episode's own title/lesson
     text (whatever topic it actually is — never a hardcoded genre/mood), so
     it's relevant per-episode rather than a fixed loop. Falls back to a
-    generic pleasant-instrumental search if the topic query has no matches."""
+    generic pleasant-instrumental search if the topic query has no matches.
+    Only considers tracks cleared for commercial use (see
+    _commercial_use_ok) since this channel is monetized."""
     client_id = os.environ.get("JAMENDO_CLIENT_ID", "").strip()
     if not client_id:
         return None
     query = f"{ep['episode'].get('title', '')} {ep['episode'].get('lesson', '')}".strip()
     try:
         results = _jamendo_search(client_id, search=query) if query else []
+        results = [t for t in results if _commercial_use_ok(t)]
         if not results:
-            info(f"Jamendo: no match for '{query}', trying generic pleasant-instrumental search")
-            results = _jamendo_search(client_id, tags="children happy")
+            info(f"Jamendo: no commercial-use match for '{query}', trying generic pleasant-instrumental search")
+            results = [t for t in _jamendo_search(client_id, tags="children happy") if _commercial_use_ok(t)]
     except Exception as e:
         info(f"Jamendo search failed: {e}")
         return None
     if not results:
+        info("Jamendo: no commercial-use-cleared tracks found")
         return None
     track = results[0]
     audio_url = track.get("audio")
