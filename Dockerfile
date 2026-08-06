@@ -119,7 +119,10 @@ PY
 
 COPY workflow_v17_api.json    ./
 COPY entrypoint.sh            ./
-RUN chmod +x entrypoint.sh
+# Defensive: strip CRLF regardless of the host OS/editor that last touched this
+# file — a CRLF shebang ("#!/usr/bin/env bash\r") makes the container exit
+# immediately with "bash\r: No such file or directory" and silently loop-crash.
+RUN sed -i 's/\r$//' entrypoint.sh && chmod +x entrypoint.sh
 
 ENV COMFY_HOST=http://127.0.0.1:8188 \
     COMFY_OUTPUT=/models/output \
