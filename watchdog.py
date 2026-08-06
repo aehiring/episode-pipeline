@@ -212,6 +212,39 @@ def ensure_models():
     info("ensure_models: all required models verified OK")
 
 
+# ── Python dependency self-heal ────────────────────────────────────────
+# Same idea as ensure_models() but for a missing pip package rather than a
+# model file — lets a dependency gap found on a live run (e.g.
+# ComfyUI-LatentSyncWrapper needing torchcodec for torchaudio.save(), found
+# 2026-08-06) be installed into the running container via a reboot (which
+# re-pulls and re-runs this file) instead of requiring a whole new Docker
+# image + fresh instance rent, matching the Dockerfile fix that also
+# bakes it in for future builds from scratch.
+PYTHON_DEPS = ["torchcodec"]
+_PY_DEPS_VERIFIED_OK = False
+
+
+def ensure_python_deps():
+    global _PY_DEPS_VERIFIED_OK
+    if _PY_DEPS_VERIFIED_OK or SKIP_MODEL_CHECK:
+        _PY_DEPS_VERIFIED_OK = True
+        return
+    import importlib, subprocess
+    for pkg in PYTHON_DEPS:
+        try:
+            importlib.import_module(pkg)
+            continue
+        except ImportError:
+            pass
+        info(f"ensure_python_deps: {pkg} missing — installing")
+        r = subprocess.run(["pip", "install", "-q", pkg], capture_output=True, text=True)
+        if r.returncode != 0:
+            loud(f"ensure_python_deps: FAILED to install {pkg}: {r.stderr[-300:]}")
+        else:
+            info(f"ensure_python_deps: {pkg} installed OK")
+    _PY_DEPS_VERIFIED_OK = True
+
+
 # ── Self-growing SFX library ───────────────────────────────────────────
 
 def _drop_sfx(ep, names):
@@ -537,6 +570,7 @@ def run_episode(ep):
     if n_scenes != len(ep["scenes"]):
         raise RuntimeError(f"watchdog FATAL: episode.scene_count={n_scenes} but {len(ep['scenes'])} scenes present")
     ensure_models()
+    ensure_python_deps()
     ensure_sfx_library(ep)
     governor = Governor(ep["totals"]["total_frames_16fps"], RATE)
     t_start = time.time()
@@ -558,6 +592,7 @@ def main():
         ensure_models()
     except RuntimeError as e:
         loud(str(e) + " — will keep retrying at runtime, no reboot needed once fixed")
+    ensure_python_deps()
     seen_mtime = None
     while True:
         try:
