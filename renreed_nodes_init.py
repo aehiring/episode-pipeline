@@ -62,6 +62,44 @@ def _patch_torchvision_write_video():
     tvio.write_video = _safe_write_video
 
 
+# Third call in the same LatentSyncWrapper pass: it writes a temp video
+# (write_video, patched above) then reads it back (read_video) for further
+# processing — this torchvision build has removed read_video too ("module
+# 'torchvision.io' has no attribute 'read_video'", found live 2026-08-06
+# right after write_video cleared, on the first dialogue scene that
+# actually reaches the lip-sync overlay). Same fix shape: decode the file
+# straight from ffmpeg into a [T,H,W,C] uint8 tensor, matching
+# torchvision.io.read_video's normal return shape (video, audio, info).
+def _patch_torchvision_read_video():
+    import torchvision.io as tvio
+    _orig_read_video = getattr(tvio, "read_video", None)
+
+    def _safe_read_video(filename, *a, **kw):
+        if _orig_read_video is not None:
+            try:
+                return _orig_read_video(filename, *a, **kw)
+            except Exception as e:
+                print(f"  [RenReed] torchvision.io.read_video fell back to ffmpeg ({e})")
+        import json as _json, subprocess, numpy as np, torch
+        probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=width,height,r_frame_rate", "-of", "json", str(filename)],
+            capture_output=True, text=True)
+        info = _json.loads(probe.stdout)["streams"][0]
+        w, h = info["width"], info["height"]
+        num, den = info["r_frame_rate"].split("/")
+        fps = float(num) / float(den or 1)
+        r = subprocess.run(["ffmpeg", "-v", "error", "-i", str(filename),
+                            "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], capture_output=True)
+        if r.returncode != 0 or not r.stdout:
+            raise RuntimeError(f"ffmpeg read_video fallback failed: {r.stderr.decode()[:300]}")
+        frames = np.frombuffer(r.stdout, dtype=np.uint8).reshape(-1, h, w, 3)
+        video = torch.from_numpy(frames.copy())
+        audio = torch.zeros((1, 0))
+        return video, audio, {"video_fps": fps}
+
+    tvio.read_video = _safe_read_video
+
+
 try:
     _patch_torchaudio_save()
 except Exception as _e:
@@ -71,6 +109,11 @@ try:
     _patch_torchvision_write_video()
 except Exception as _e:
     print(f"  [RenReed] torchvision.io.write_video patch skipped: {_e}")
+
+try:
+    _patch_torchvision_read_video()
+except Exception as _e:
+    print(f"  [RenReed] torchvision.io.read_video patch skipped: {_e}")
 
 from .compiler_node import NODE_CLASS_MAPPINGS as A, NODE_DISPLAY_NAME_MAPPINGS as AD
 from .character_loader_node import NODE_CLASS_MAPPINGS as B, NODE_DISPLAY_NAME_MAPPINGS as BD
