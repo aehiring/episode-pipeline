@@ -3,11 +3,23 @@ RenReedTTS — v17.2. Loud failure on every error path.
 Decoder: ffmpeg subprocess (no pydub/torchaudio/torchcodec dependency).
 Env: ELEVENLABS_API_KEY, ELEVENLABS_VOICES
 """
-import os, io, json, subprocess, urllib.request, urllib.error
+import os, io, json, re, subprocess, urllib.request, urllib.error
 
 AUDIO_DIR = os.environ.get("EPISODE_AUDIO_DIR", "/models/input/episode_audio")
 API = "https://api.elevenlabs.io/v1/text-to-speech/{vid}?output_format=mp3_44100_128"
 MIN_BYTES = 4000
+
+def _norm_name(name):
+    """Multi-word character names ("COACH NIA", "MR PIP") get mangled in
+    different ways depending on HOW an instance's env vars were set: Vast's
+    API docker-args string splits raw spaces (fixed via quoting in
+    rent_instance.py), but a manually-created instance's dashboard env-var
+    form was found (2026-08-06) to silently turn spaces into underscores
+    instead ("COACH_NIA"). Rather than chase every env-entry path's own
+    mangling convention, normalize BOTH sides of the lookup — collapse any
+    run of whitespace/underscores to a single space — so the match succeeds
+    regardless of which convention a given instance happened to use."""
+    return re.sub(r"[_\s]+", " ", name.strip().upper())
 
 def _parse_voice_map(raw=None):
     raw = raw if raw is not None else os.environ.get("ELEVENLABS_VOICES", "")
@@ -18,11 +30,11 @@ def _parse_voice_map(raw=None):
         k, v = part.split(":", 1)
         if not v.strip():
             raise RuntimeError(f"RenReedTTS FATAL: empty voice id for '{k.strip()}'")
-        m[k.strip().upper()] = v.strip()
+        m[_norm_name(k)] = v.strip()
     return m
 
 def _require_voice(speaker, vmap):
-    sp = speaker.strip().upper()
+    sp = _norm_name(speaker)
     if sp == "NONE": return None
     if sp not in vmap:
         raise RuntimeError(f"RenReedTTS FATAL: no voice id for '{sp}'. ELEVENLABS_VOICES has: {sorted(vmap)}")
