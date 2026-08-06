@@ -215,25 +215,32 @@ def scene_template_action(ep, scene, anchor_image="anchor_current.png"):
     non-static camera_motion. Uses Wan2.2's native, general-purpose I2V
     conditioning (WanImageToVideo — ships with core ComfyUI, text-driven via
     motion_prompts, follows ANY described action on ANY topic — no fixed
-    pose list), or WanCameraImageToVideo (Kijai's ComfyUI-WanVideoWrapper,
-    Fun Camera Control) when camera movement is requested — that node also
-    takes the same free-text positive conditioning, so one pass covers both
-    "character does X" and "camera does Y" together rather than chaining two
-    separate motion passes. Dual high/low-noise MoE KSamplerAdvanced pattern
-    (matches the LightX2V 4-step lora pair downloaded in entrypoint.sh).
-    ShmuelRonen's ComfyUI-LatentSyncWrapper then overlays the TTS audio as a
-    decoupled lip-sync pass (silent motion first, mouth-sync after — the
-    video model isn't fighting body motion and mouth accuracy at once).
+    pose list), or WanCameraImageToVideo (Fun Camera Control) when camera
+    movement is requested — that node also takes the same free-text positive
+    conditioning, so one pass covers both "character does X" and "camera
+    does Y" together rather than chaining two separate motion passes. Dual
+    high/low-noise MoE KSamplerAdvanced pattern (matches the LightX2V
+    4-step lora pair downloaded in entrypoint.sh).
+
+    No separate lip-sync overlay: tried ShmuelRonen's ComfyUI-LatentSync
+    Wrapper for decoupled lip-sync (silent motion, then a mouth-sync pass),
+    but its face-analysis step (insightface) is fundamentally built for
+    photorealistic human faces and can't detect our Pixar-style cartoon
+    characters at all — confirmed live (2026-08-06) and via known upstream
+    limitations, not a fixable bug. Dropped entirely: for dialogue scenes on
+    this path, motion_prompts should itself describe the character speaking/
+    mouth moving (same descriptive approach already used for any other
+    action), and the real TTS audio still drives the scene's audio track —
+    mouth movement just isn't frame-accurate to phonemes, which is an
+    acceptable tradeoff for this content style.
 
     Node shapes verified against a live install (2026-08-06, first real GPU
     test): WanImageToVideo and WanCameraImageToVideo matched as written.
     WanCameraEmbedding's real input is "camera_pose" (a 9-value Title Case
     combo, not our 13-value snake_case camera_motion) — mapped via
-    CAMERA_POSE_MAP above. LatentSyncNode's real required inputs are
-    images/audio/seed/lips_expression/inference_steps, not video/
-    video_frame_rate. Everything upstream (Kontext keyframe, anchor loading)
-    is the same proven code as scene_template() — only the motion stage
-    differs.
+    CAMERA_POSE_MAP above. Everything upstream (Kontext keyframe, anchor
+    loading) is the same proven code as scene_template() — only the motion
+    stage differs.
     =============================================================================
     """
     G, N, L = _graph()
@@ -276,20 +283,8 @@ def scene_template_action(ep, scene, anchor_image="anchor_current.png"):
     dec = N("VAEDecode", {"samples": L(lo_pass), "vae": L(i2v["wvae"])}, f"decode {total_frames}f")
 
     tts = N("RenReedTTS", {"episode_json": ep_json, "scene_number": n}, "TTS (loud)")
-    speaker = scene.get("speaker", "NONE")
-    if speaker not in ("NONE", "NARRATOR"):
-        # Only run the lip-sync overlay when a character is actually speaking
-        # on screen — LatentSync's face-analysis step fails ("Face not
-        # detected") on speaker=NONE scenes that describe no visible
-        # character at all (found live 2026-08-06: scene 1 is a pure
-        # establishing shot, no characters yet). NARRATOR scenes are also
-        # skipped since compiler rule 2 already requires zero visible faces
-        # in them, so there'd be nothing to sync to either.
-        video_out = N("LatentSyncNode", {"images": L(dec), "audio": L(tts, 0),
-            "seed": 1247, "lips_expression": 1.5, "inference_steps": 20}, "lip-sync overlay")
-        video_out = L(video_out, 0)
-    else:
-        video_out = L(dec)
+    video_out = L(dec)  # no lip-sync overlay — see module docstring; motion_prompts
+                        # itself should describe speaking/mouth movement when relevant
 
     f1 = N("ImageFromBatch", {"image": video_out, "batch_index": 1, "length": 1}, "frame1")
     rest = N("ImageFromBatch", {"image": video_out, "batch_index": 1, "length": total_frames - 1}, "f1..last")
