@@ -104,7 +104,12 @@ CODE_URL="${PIPELINE_CODE_URL:-https://raw.githubusercontent.com/aehiring/episod
 FILES="compiler_node.py character_loader_node.py renreed_tts_node.py postmaster_node.py scene_data_node.py validator_core.py renreed_nodes_init.py"
 UPDATED=0; FAILED=0
 for f in $FILES; do
-    dest="/opt/ComfyUI/custom_nodes/RenReedNodes/$f"
+    # renreed_nodes_init.py is baked as __init__.py (Dockerfile renames it on
+    # COPY) — ComfyUI only ever imports __init__.py, so the auto-pull must
+    # write there too, or an updated renreed_nodes_init.py silently lands as
+    # a dead file next to the stale __init__.py ComfyUI actually loads.
+    if [ "$f" = "renreed_nodes_init.py" ]; then dest="/opt/ComfyUI/custom_nodes/RenReedNodes/__init__.py"
+    else dest="/opt/ComfyUI/custom_nodes/RenReedNodes/$f"; fi
     if curl -fsSL --connect-timeout 10 --max-time 30 "$CODE_URL/$f" -o /tmp/_pull_$f 2>/dev/null; then
         if python3 -c "import ast,sys; ast.parse(open('/tmp/_pull_$f').read()); sys.exit(0)" 2>/dev/null; then
             mv /tmp/_pull_$f "$dest"; UPDATED=$((UPDATED+1))
