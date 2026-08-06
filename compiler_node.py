@@ -163,7 +163,22 @@ VISUAL QUALITY RULES — these affect what actually renders, follow them exactly
    for (e.g. "engine_start", "paint_brush_stroke") — a name not in the seed
    list is generated on demand at render time, so don't avoid a sound just
    because it isn't in the seed set. Only add an sfx entry when the script
-   actually implies a distinct sound, never decoratively."""
+   actually implies a distinct sound, never decoratively.
+
+10. PHYSICAL CONTACT / COMPLETION — describe physical actions literally
+    enough that the described action actually reaches its endpoint, not
+    just a gesture toward it: the image/video model follows concrete
+    physical descriptions closely, but a vague approach description
+    ("reaches toward the rock", "leans down near the ground") often
+    renders as the character stopping short of contact rather than
+    completing it. Found live (2026-08-06): "REN tells REED to touch the
+    ground" rendered as both characters bending down without actually
+    touching it. When a script describes a character touching, holding,
+    pressing, grabbing, or otherwise physically contacting something,
+    motion_prompts must say so explicitly and completely — e.g. "REED's
+    palm presses flat against the rock surface, fingers spread, full
+    contact" rather than "REED reaches toward the rock" — describe the
+    contact itself, not just the movement leading up to it."""
 
 class EpisodeCompile:
     @classmethod

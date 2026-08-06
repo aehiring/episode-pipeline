@@ -227,10 +227,26 @@ def _camera_safe_length(frames):
 def _needs_action_path(scene):
     """Cheap-path scenes (just standing, static camera) keep using the plain
     S2V scene_template above — only pay for the heavier general I2V action/
-    camera/decoupled-lip-sync pipeline when a scene actually asks for real
-    motion. has_physical_action is a free-text-backed flag (motion_prompts
-    already carries whatever the script describes, any topic) — NOT a fixed
-    pose list."""
+    camera pipeline when a scene actually asks for real motion.
+    has_physical_action is a free-text-backed flag (motion_prompts already
+    carries whatever the script describes, any topic) — NOT a fixed pose
+    list.
+
+    Multi-character dialogue scenes are a deliberate EXCEPTION: user
+    feedback 2026-08-06 — "jahan REN aur REED dono hain, wahan characters
+    ki voice/lipsync nahi hai" (wherever both characters are present,
+    there's no character lip-sync) — with LatentSync removed (incompatible
+    with cartoon faces), the I2V/camera path has NO lip-sync at all, only a
+    described "speaking" motion. S2V is Wan2.2's native audio-driven
+    talking model — proven to lip-sync correctly on this exact art style
+    (the original 59-scene episode) — so any scene with 2+ visible
+    characters AND an actual speaker takes the S2V path regardless of
+    has_physical_action/camera_motion, trading body-action/camera fidelity
+    for correct lip-sync, which matters more for a scene that reads as two
+    characters actually talking to each other."""
+    speaker = scene.get("speaker", "NONE")
+    if len(scene.get("characters", [])) >= 2 and speaker not in ("NONE", "NARRATOR"):
+        return False
     return scene.get("has_physical_action", False) \
         or scene.get("camera_motion", "static") != "static"
 
@@ -302,14 +318,32 @@ def scene_template_action(ep, scene, anchor_image="anchor_current.png"):
             "width": 832, "height": 480, "length": total_frames, "batch_size": 1,
             "start_image": L(k480, 0)}, "I2V cond")
 
+    # EXPERIMENT (2026-08-06, not yet verified live): user reported the
+    # rendered motion feels slightly slow-motion — a known tradeoff of the
+    # LightX2V 4-step speed lora (research: "may result in reduced video
+    # dynamics"). Full "standard" Wan2.2 settings (~20 steps, cfg~3.5)
+    # would fix this but cost an estimated 7-10x more render time/GPU cost
+    # (steps 4->20 is 5x, cfg 1.0->3.5 needs both cond/uncond branches
+    # computed each step, another ~2x) — likely pushes an 8-min episode
+    # well past the $5.50-6 cost ceiling. Trying a middle ground instead:
+    # double the steps (4->8) at the SAME cfg=1.0 and lora strength, the
+    # cheapest lever to try first. Needs a real GPU test to confirm it
+    # actually improves dynamics — the LightX2V lora is distilled for
+    # exactly 4 steps, so more steps isn't guaranteed to help; if this
+    # doesn't move the needle, next try lowering strength_model on
+    # i2v["hi"]/i2v["lo"] (and the camera equivalents) slightly instead of
+    # raising steps further.
+    ACTION_STEPS = 8
+    ACTION_STEP_BOUNDARY = ACTION_STEPS // 2
+
     def KS(model, lat, add_noise, start, end, leftover, title):
         return N("KSamplerAdvanced", {"model": model, "add_noise": add_noise, "noise_seed": 9,
-            "steps": 4, "cfg": 1.0, "sampler_name": "euler", "scheduler": "simple",
+            "steps": ACTION_STEPS, "cfg": 1.0, "sampler_name": "euler", "scheduler": "simple",
             "positive": L(cond, 0), "negative": L(cond, 1), "latent_image": lat,
             "start_at_step": start, "end_at_step": end, "return_with_leftover_noise": leftover}, title)
 
-    hi_pass = KS(L(models["hi"]), L(cond, 2), "enable", 0, 2, "enable", "KSA hi (MoE)")
-    lo_pass = KS(L(models["lo"]), L(hi_pass), "disable", 2, 10000, "disable", "KSA lo (MoE)")
+    hi_pass = KS(L(models["hi"]), L(cond, 2), "enable", 0, ACTION_STEP_BOUNDARY, "enable", "KSA hi (MoE)")
+    lo_pass = KS(L(models["lo"]), L(hi_pass), "disable", ACTION_STEP_BOUNDARY, 10000, "disable", "KSA lo (MoE)")
     dec = N("VAEDecode", {"samples": L(lo_pass), "vae": L(models["wvae"])}, f"decode {total_frames}f")
 
     tts = N("RenReedTTS", {"episode_json": ep_json, "scene_number": n}, "TTS (loud)")
