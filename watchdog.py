@@ -121,8 +121,8 @@ HF_MODELS = [
     (_C, "split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors", "diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors", 5_000_000_000, False),
     (_CAM, "high_noise_model/diffusion_pytorch_model.safetensors", "diffusion_models/wan2.2_fun_camera_high_noise_14B.safetensors", 5_000_000_000, False),
     (_CAM, "low_noise_model/diffusion_pytorch_model.safetensors", "diffusion_models/wan2.2_fun_camera_low_noise_14B.safetensors", 5_000_000_000, False),
-    (_LX2V, "Wan2.2-I2V-A14B-4steps-lora-rank64-V1/high_noise_model.safetensors", "loras/wan22_i2v_lightx2v_4steps_high_noise.safetensors", 200_000_000, False),
-    (_LX2V, "Wan2.2-I2V-A14B-4steps-lora-rank64-V1/low_noise_model.safetensors", "loras/wan22_i2v_lightx2v_4steps_low_noise.safetensors", 200_000_000, False),
+    (_LX2V, "Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/high_noise_model.safetensors", "loras/wan22_i2v_lightx2v_4steps_high_noise.safetensors", 200_000_000, False),
+    (_LX2V, "Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/low_noise_model.safetensors", "loras/wan22_i2v_lightx2v_4steps_low_noise.safetensors", 200_000_000, False),
 ]
 
 # direct-URL fallbacks (entrypoint.sh's non-HF-API curl downloads)

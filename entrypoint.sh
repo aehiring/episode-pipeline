@@ -88,8 +88,8 @@ CAM=alibaba-pai/Wan2.2-Fun-A14B-Control-Camera
 get "$CAM" high_noise_model/diffusion_pytorch_model.safetensors "$M/diffusion_models" "wan2.2_fun_camera_high_noise_14B.safetensors" || true
 get "$CAM" low_noise_model/diffusion_pytorch_model.safetensors  "$M/diffusion_models" "wan2.2_fun_camera_low_noise_14B.safetensors"  || true
 LX2V=lightx2v/Wan2.2-Lightning
-get "$LX2V" Wan2.2-I2V-A14B-4steps-lora-rank64-V1/high_noise_model.safetensors "$M/loras" "wan22_i2v_lightx2v_4steps_high_noise.safetensors" || true
-get "$LX2V" Wan2.2-I2V-A14B-4steps-lora-rank64-V1/low_noise_model.safetensors  "$M/loras" "wan22_i2v_lightx2v_4steps_low_noise.safetensors"  || true
+get "$LX2V" Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/high_noise_model.safetensors "$M/loras" "wan22_i2v_lightx2v_4steps_high_noise.safetensors" || true
+get "$LX2V" Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/low_noise_model.safetensors  "$M/loras" "wan22_i2v_lightx2v_4steps_low_noise.safetensors"  || true
 echo "  note: LatentSync lip-sync model — ComfyUI-LatentSyncWrapper node fetches its own checkpoint on first use; verify on first real run"
 
 # ── input dir: LoadAudio-class nodes resolve against ComfyUI/input ──
