@@ -71,10 +71,9 @@ def _wan_loaders(N, L):
 
 def _wan_i2v_loaders(N, L):
     """Wan2.2 I2V dual-expert (high-noise/low-noise MoE) stack for the general
-    action path — ANY physical action on ANY topic, driven by motion_prompts
-    free text (no fixed pose list). Native ComfyUI nodes only; the camera-
-    motion variant (WanCameraImageToVideo) reuses this same model/lora pair,
-    just swapping which conditioning node feeds the samplers below."""
+    action path (static camera) — ANY physical action on ANY topic, driven
+    by motion_prompts free text (no fixed pose list). Native ComfyUI nodes
+    only. NOT used for camera-motion scenes — see _wan_camera_loaders()."""
     hi_u = N("UNETLoader", {"unet_name": "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors", "weight_dtype": "default"}, "I2V UNET hi")
     hi_l = N("LoraLoaderModelOnly", {"model": L(hi_u),
         "lora_name": "wan22_i2v_lightx2v_4steps_high_noise.safetensors", "strength_model": 1.0}, "I2V LoRA hi")
@@ -83,7 +82,35 @@ def _wan_i2v_loaders(N, L):
         "lora_name": "wan22_i2v_lightx2v_4steps_low_noise.safetensors", "strength_model": 1.0}, "I2V LoRA lo")
     wclip = N("CLIPLoader", {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan", "device": "default"}, "Wan CLIP (i2v)")
     wvae  = N("VAELoader", {"vae_name": "wan_2.1_vae.safetensors"}, "Wan VAE (i2v)")
-    wneg  = N("CLIPTextEncode", {"clip": L(wclip), "text": "blurry, static, frozen, jerky motion, deformed hands, text, watermark"}, "Wan neg (i2v)")
+    wneg  = N("CLIPTextEncode", {"clip": L(wclip), "text": "blurry, static, frozen, jerky motion, deformed hands, text, "
+        "watermark, sparkles on face, glitter on mouth, glowing artifacts on face, distorted mouth, "
+        "visual noise on character"}, "Wan neg (i2v)")
+    return {"hi": hi_l, "lo": lo_l, "wclip": wclip, "wvae": wvae, "wneg": wneg}
+
+
+def _wan_camera_loaders(N, L):
+    """Wan2.2 Fun Camera Control dual-expert stack — a SEPARATE diffusion
+    checkpoint from the vanilla I2V one above, specifically trained to
+    follow WanCameraEmbedding/WanCameraImageToVideo's camera conditioning.
+    Found live (2026-08-06): feeding camera conditioning into the vanilla
+    I2V model (which was never trained on it) produced complete generation
+    breakdown — pure noise, no recognizable content, on every camera-motion
+    scene. The official Wan2.2 Fun Camera Control workflow pairs this
+    checkpoint with the SAME LightX2V 4-step I2V lightning lora we already
+    use for the vanilla path (confirmed via research — the lora is
+    lora-family-compatible across both checkpoints, only the base UNET
+    differs), so no new lora download is needed."""
+    hi_u = N("UNETLoader", {"unet_name": "wan2.2_fun_camera_high_noise_14B.safetensors", "weight_dtype": "default"}, "Camera UNET hi")
+    hi_l = N("LoraLoaderModelOnly", {"model": L(hi_u),
+        "lora_name": "wan22_i2v_lightx2v_4steps_high_noise.safetensors", "strength_model": 1.0}, "Camera LoRA hi")
+    lo_u = N("UNETLoader", {"unet_name": "wan2.2_fun_camera_low_noise_14B.safetensors", "weight_dtype": "default"}, "Camera UNET lo")
+    lo_l = N("LoraLoaderModelOnly", {"model": L(lo_u),
+        "lora_name": "wan22_i2v_lightx2v_4steps_low_noise.safetensors", "strength_model": 1.0}, "Camera LoRA lo")
+    wclip = N("CLIPLoader", {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan", "device": "default"}, "Wan CLIP (camera)")
+    wvae  = N("VAELoader", {"vae_name": "wan_2.1_vae.safetensors"}, "Wan VAE (camera)")
+    wneg  = N("CLIPTextEncode", {"clip": L(wclip), "text": "blurry, static, frozen, jerky motion, deformed hands, text, "
+        "watermark, sparkles on face, glitter on mouth, glowing artifacts on face, distorted mouth, "
+        "visual noise on character"}, "Wan neg (camera)")
     return {"hi": hi_l, "lo": lo_l, "wclip": wclip, "wvae": wvae, "wneg": wneg}
 
 
@@ -256,19 +283,22 @@ def scene_template_action(ep, scene, anchor_image="anchor_current.png"):
     k480 = N("ImageScale", {"image": L(kf), "upscale_method": "lanczos", "width": 832, "height": 480, "crop": "center"}, "->832x480")
     motion_text = " ".join(scene["motion_prompts"])
 
-    i2v = _wan_i2v_loaders(N, L)
-    pos = N("CLIPTextEncode", {"clip": L(i2v["wclip"]), "text": motion_text}, "I2V pos")
+    if cam_motion != "static":
+        models = _wan_camera_loaders(N, L)  # dedicated Fun Camera Control checkpoint — see its docstring
+    else:
+        models = _wan_i2v_loaders(N, L)
+    pos = N("CLIPTextEncode", {"clip": L(models["wclip"]), "text": motion_text}, "motion pos")
 
     if cam_motion != "static":
         cam_length = _camera_safe_length(total_frames)  # padded for WanCameraEmbedding's reshape constraint
         cam_embed = N("WanCameraEmbedding", {"camera_pose": CAMERA_POSE_MAP.get(cam_motion, "Static"),
             "width": 832, "height": 480, "length": cam_length}, "camera embed")
         cond = N("WanCameraImageToVideo", {
-            "positive": L(pos), "negative": L(i2v["wneg"]), "vae": L(i2v["wvae"]),
+            "positive": L(pos), "negative": L(models["wneg"]), "vae": L(models["wvae"]),
             "width": 832, "height": 480, "length": cam_length, "batch_size": 1,
             "start_image": L(k480, 0), "camera_conditions": L(cam_embed, 0)}, "camera cond")
     else:
-        cond = N("WanImageToVideo", {"positive": L(pos), "negative": L(i2v["wneg"]), "vae": L(i2v["wvae"]),
+        cond = N("WanImageToVideo", {"positive": L(pos), "negative": L(models["wneg"]), "vae": L(models["wvae"]),
             "width": 832, "height": 480, "length": total_frames, "batch_size": 1,
             "start_image": L(k480, 0)}, "I2V cond")
 
@@ -278,9 +308,9 @@ def scene_template_action(ep, scene, anchor_image="anchor_current.png"):
             "positive": L(cond, 0), "negative": L(cond, 1), "latent_image": lat,
             "start_at_step": start, "end_at_step": end, "return_with_leftover_noise": leftover}, title)
 
-    hi_pass = KS(L(i2v["hi"]), L(cond, 2), "enable", 0, 2, "enable", "KSA hi (MoE)")
-    lo_pass = KS(L(i2v["lo"]), L(hi_pass), "disable", 2, 10000, "disable", "KSA lo (MoE)")
-    dec = N("VAEDecode", {"samples": L(lo_pass), "vae": L(i2v["wvae"])}, f"decode {total_frames}f")
+    hi_pass = KS(L(models["hi"]), L(cond, 2), "enable", 0, 2, "enable", "KSA hi (MoE)")
+    lo_pass = KS(L(models["lo"]), L(hi_pass), "disable", 2, 10000, "disable", "KSA lo (MoE)")
+    dec = N("VAEDecode", {"samples": L(lo_pass), "vae": L(models["wvae"])}, f"decode {total_frames}f")
 
     tts = N("RenReedTTS", {"episode_json": ep_json, "scene_number": n}, "TTS (loud)")
     video_out = L(dec)  # no lip-sync overlay — see module docstring; motion_prompts
@@ -291,8 +321,19 @@ def scene_template_action(ep, scene, anchor_image="anchor_current.png"):
     fix = N("ImageBatch", {"image1": L(f1), "image2": L(rest)}, f"fixed {total_frames}")
     N("VHS_VideoCombine", {"frame_rate": 16, "loop_count": 0, "filename_prefix": "scenes/scene",
         "format": "video/h264-mp4", "pix_fmt": "yuv420p", "crf": 17, "save_metadata": False,
-        "trim_to_audio": True, "pingpong": False, "save_output": True,
+        "trim_to_audio": False, "pingpong": False, "save_output": True,
         "images": L(fix), "audio": L(tts, 0)}, "save scene mp4")
+    # trim_to_audio=False (unlike scene_template()'s S2V path, where it's
+    # correct — S2V IS audio-driven, so video naturally matches speech
+    # length). On the I2V/camera action path the video is NOT audio-driven
+    # at all (no lip-sync overlay, see above), so trimming to audio length
+    # was cutting scenes down to their spoken dialogue's actual duration —
+    # e.g. a 9.6s scene (2 chunks) with a short line got cut to ~3s, and a
+    # speaker=NONE scene got cut to exactly 1.0s (RenReedTTS's silent-audio
+    # placeholder is only 1 second long). Found live 2026-08-06: the whole
+    # "Breathing Mountain" episode (should be ~58s) came out as 12.8s.
+    # Video now always plays its full chunk-based length regardless of the
+    # (possibly much shorter) TTS audio track underneath.
     return G
 
 
