@@ -66,6 +66,21 @@ lget(){ # lget <url> <dest> <min_bytes>
 lget "https://huggingface.co/lightx2v/Wan2.2-Lightning/resolve/main/Wan2.2-T2V-A14B-4steps-lora-rank64-Seko-V1.1/high_noise_model.safetensors" \
      "$M/loras/wan22_lightning_fallback_high.safetensors" 400000000
 
+# ── v18 action/camera upgrade: Fun Camera Control + Fun Control (pose) ──
+# NOTE: dual high/low-noise mixture-of-experts models (unlike single-model S2V
+# above) — confirm exact filenames/repo still match once actually tested;
+# this is the R&D phase flagged in the architecture plan, not a locked spec.
+CAM=alibaba-pai/Wan2.2-Fun-A14B-Control-Camera
+get "$CAM" high_noise_model/diffusion_pytorch_model.safetensors "$M/diffusion_models" || true
+get "$CAM" low_noise_model/diffusion_pytorch_model.safetensors  "$M/diffusion_models" || true
+POSE=alibaba-pai/Wan2.2-Fun-A14B-Control
+get "$POSE" high_noise_model/diffusion_pytorch_model.safetensors "$M/diffusion_models" || true
+get "$POSE" low_noise_model/diffusion_pytorch_model.safetensors  "$M/diffusion_models" || true
+LX2V=lightx2v/Wan2.2-Lightning
+get "$LX2V" Wan2.2-I2V-A14B-4steps-lora-rank64-V1/high_noise_model.safetensors "$M/loras" || true
+get "$LX2V" Wan2.2-I2V-A14B-4steps-lora-rank64-V1/low_noise_model.safetensors  "$M/loras" || true
+echo "  note: LatentSync lip-sync model — ComfyUI-LatentSyncWrapper node fetches its own checkpoint on first use; verify on first real run"
+
 # ── input dir: LoadAudio-class nodes resolve against ComfyUI/input ──
 if [ ! -L /opt/ComfyUI/input ]; then rm -rf /opt/ComfyUI/input; ln -s "$M/input" /opt/ComfyUI/input; fi
 echo "  ok   input dir -> $M/input"

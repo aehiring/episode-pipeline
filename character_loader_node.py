@@ -46,3 +46,30 @@ class CharacterRefLoader:
 
 NODE_CLASS_MAPPINGS = {"CharacterRefLoader": CharacterRefLoader}
 NODE_DISPLAY_NAME_MAPPINGS = {"CharacterRefLoader": "Character Refs (baked)"}
+
+
+POSE_DIR = os.environ.get("POSE_ASSET_DIR", "/opt/pipeline/assets/poses")
+
+class PoseRefLoader:
+    """Loads one baked OpenPose-skeleton reference image (pose_build.py) by
+    locked pose_library name. Same load pattern as CharacterRefLoader."""
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"pose_library": ("STRING", {"default": "standing_neutral"})}}
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("pose_image",)
+    FUNCTION = "load"
+    CATEGORY = "RenReed"
+
+    def load(self, pose_library):
+        path = os.path.join(POSE_DIR, pose_library, "pose.png")
+        if not os.path.isfile(path):
+            raise RuntimeError(f"PoseRefLoader FATAL: missing baked pose asset: {path}")
+        import torch, numpy as np
+        from PIL import Image
+        img = Image.open(path).convert("RGB")
+        tensor = torch.from_numpy(np.asarray(img).astype("float32") / 255.0).unsqueeze(0)
+        return (tensor,)
+
+NODE_CLASS_MAPPINGS["PoseRefLoader"] = PoseRefLoader
+NODE_DISPLAY_NAME_MAPPINGS["PoseRefLoader"] = "Pose Reference (baked)"

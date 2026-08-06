@@ -25,11 +25,15 @@ RUN set -eux; \
         https://github.com/EllangoK/ComfyUI-post-processing-nodes.git \
         https://github.com/set-soft/ComfyUI-AudioBatch.git \
         https://github.com/Fannovel16/ComfyUI-Frame-Interpolation.git \
+        https://github.com/kijai/ComfyUI-WanVideoWrapper.git \
+        https://github.com/ShmuelRonen/ComfyUI-LatentSyncWrapper.git \
     ; do git clone --depth 1 "$repo"; done; \
     for d in */ ; do \
         if [ -f "$d/requirements.txt" ]; then pip install -r "$d/requirements.txt" || true; fi; \
     done
 # NOTE: jerilseb/ComfyUI-ElevenLabs RETIRED — replaced by RenReedTTS (own node)
+# ComfyUI-WanVideoWrapper needs mediapipe (camera-control / pose-conditioned S2V)
+RUN pip install mediapipe || echo "mediapipe install failed, camera/pose control may not work — investigate before relying on it"
 
 # ── cu128 torch (Blackwell sm_120) — must come AFTER node reqs ──
 RUN pip install --upgrade --force-reinstall \
@@ -56,6 +60,7 @@ COPY watchdog.py              ./
 COPY build_v17_graph.py       ./
 COPY assets/characters/       ./assets/characters/
 COPY assets/sfx/              ./assets/sfx/
+COPY assets/poses/            ./assets/poses/
 
 # RenReed nodes live as ONE custom-node package
 RUN mkdir -p /opt/ComfyUI/custom_nodes/RenReedNodes
@@ -82,6 +87,12 @@ if have != need:
 for f in sorted(have & need):
     fp = f"/opt/pipeline/assets/sfx/{f}.mp3"
     if os.path.getsize(fp) < 6000: errs.append(f"sfx too small (junk): {fp}")
+# poses: exact match with schema list
+pose_have = {d for d in os.listdir('/opt/pipeline/assets/poses')
+             if os.path.isfile(f'/opt/pipeline/assets/poses/{d}/pose.png')}
+pose_need = set(C.get("pose_library", []))
+if pose_have != pose_need:
+    errs.append(f"pose mismatch: missing={sorted(pose_need-pose_have)} extra={sorted(pose_have-pose_need)}")
 # nodes importable (logic layer only; torch parts lazy)
 sys.path.insert(0, '/opt/ComfyUI/custom_nodes/RenReedNodes')
 import validator_core, compiler_node, character_loader_node, renreed_tts_node, postmaster_node, scene_data_node  # noqa
@@ -93,10 +104,11 @@ _sample = {"schema_version":"1.0","episode":{"title":"t","logline":"t","lesson":
     "scenes":[{"scene_number":1,"chunks":2,"duration_s":9.625,"start_time_s":0.0,"location":"X",
     "time_of_day":"DAY","characters":["REN"],"speaker":"NONE","wardrobe":{"carry":True},"shot":"WIDE",
     "keyframe_prompt":C["style_anchor"]+". x","motion_prompts":["a","b"],"dialogue":"NONE",
-    "dialogue_word_count":0,"sfx":[]}],
+    "dialogue_word_count":0,"sfx":[],"pose_library":"tree_pose","camera_motion":"zoom_in"}],
     "totals":{"sum_chunks":2,"sum_duration_s":9.625,"total_frames_16fps":154}}
 for name, fn in [("anchor", lambda: bg.anchor_template(_sample)),
                  ("scene", lambda: bg.scene_template(_sample, _sample["scenes"][0])),
+                 ("scene_action", lambda: bg.scene_template_action(_sample, _sample["scenes"][0])),
                  ("postmaster", lambda: bg.postmaster_template(_sample)),
                  ("trigger", lambda: bg.trigger_template())]:
     try:
@@ -108,7 +120,7 @@ for name, fn in [("anchor", lambda: bg.anchor_template(_sample)),
         errs.append(f"{name}_template FAILED to build: {e}")
 if errs:
     print("BUILD ASSERT FAILED:"); [print("  -", e) for e in errs]; sys.exit(1)
-print(f"BUILD ASSERTS OK: {len(C['roster'])} characters, {len(need)} SFX, 6 modules import clean")
+print(f"BUILD ASSERTS OK: {len(C['roster'])} characters, {len(need)} SFX, {len(pose_need)} poses, 6 modules import clean")
 PY
 
 COPY workflow_v17_api.json    ./
@@ -122,8 +134,10 @@ ENV COMFY_HOST=http://127.0.0.1:8188 \
     EPISODE_SCHEMA_PATH=/opt/pipeline/episode_schema.json \
     CHARACTER_ASSET_DIR=/opt/pipeline/assets/characters \
     SFX_ASSET_DIR=/opt/pipeline/assets/sfx \
+    POSE_ASSET_DIR=/opt/pipeline/assets/poses \
     EPISODE_AUDIO_DIR=/models/input/episode_audio \
     EPISODE_COMPILED_PATH=/models/input/episode_compiled.json \
+    EPISODE_MUSIC_PATH=/models/output/episode_music.mp3 \
     SCENE_TIMEOUT_MINUTES=20 \
     SCENE_MAX_RETRIES=2 \
     EPISODE_CAP=5.50

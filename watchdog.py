@@ -30,6 +30,8 @@ COMFY_INPUT = os.environ.get("COMFY_INPUT", "/models/input")
 COMFY_OUTPUT = os.environ.get("COMFY_OUTPUT", "/models/output")
 SCENES_DIR = os.path.join(COMFY_OUTPUT, "scenes")
 ANCHOR_LOCAL_NAME = "anchor_current.png"
+MUSIC_PATH = os.environ.get("EPISODE_MUSIC_PATH", os.path.join(COMFY_OUTPUT, "episode_music.mp3"))
+MIN_MUSIC_BYTES = 20000
 SCENE_TIMEOUT_MIN = float(os.environ.get("SCENE_TIMEOUT_MINUTES", "20"))
 MAX_RETRIES = int(os.environ.get("SCENE_MAX_RETRIES", "2"))
 POLL_S = 5
@@ -186,12 +188,18 @@ def run_scene(ep, scene, governor):
     if os.path.isfile(dest) and os.path.getsize(dest) >= MIN_VIDEO_BYTES:
         info(f"scene {n}: already rendered, skipping -> {dest}")
         return
+    use_action_path = G._needs_action_path(scene)
+    build_graph = (lambda: G.scene_template_action(ep, scene, anchor_image=ANCHOR_LOCAL_NAME)) if use_action_path \
+        else (lambda: G.scene_template(ep, scene, anchor_image=ANCHOR_LOCAL_NAME))
+    if use_action_path:
+        info(f"scene {n}: pose={scene.get('pose_library')} camera={scene.get('camera_motion')} -> full action/camera path")
+
     last_err = None
     for attempt in range(1, MAX_RETRIES + 2):  # first try + MAX_RETRIES retries
         info(f"scene {n}: submitting (attempt {attempt})")
         governor.scene_started(n)
         try:
-            pid = _post_prompt(G.scene_template(ep, scene, anchor_image=ANCHOR_LOCAL_NAME))
+            pid = _post_prompt(build_graph())
             entry = _wait_history(pid, SCENE_TIMEOUT_MIN, f"scene {n} (attempt {attempt})")
             fname, subfolder = _find_output_file(entry, key_hint="gifs")
             if not fname:
@@ -211,6 +219,43 @@ def run_scene(ep, scene, governor):
             if os.path.isfile(dest):
                 os.remove(dest)  # never leave a partial/stale file behind for postmaster to trip on
     raise RuntimeError(f"watchdog FATAL: scene {n} failed after {MAX_RETRIES + 1} attempts. Last error: {last_err}")
+
+
+def run_music(ep):
+    """One score per episode via ElevenLabs Music — pure HTTP call, no GPU,
+    same shape as sfx_build.py's one-time-asset pattern but per-episode
+    instead of baked-once. Never fatal: if it fails or the key is missing,
+    log loudly and continue without a score rather than blocking the episode
+    (PostMaster already handles a missing music file gracefully)."""
+    if os.path.isfile(MUSIC_PATH) and os.path.getsize(MUSIC_PATH) >= MIN_MUSIC_BYTES:
+        info(f"episode music already present, skipping: {MUSIC_PATH}")
+        return
+    key = os.environ.get("ELEVENLABS_API_KEY", "").strip()
+    if not key:
+        loud("ELEVENLABS_API_KEY not set — skipping episode score (SFX/dialogue only)")
+        return
+    title = ep["episode"].get("title", "")
+    lesson = ep["episode"].get("lesson", "")
+    duration_ms = min(600000, max(3000, int(ep["totals"]["sum_duration_s"] * 1000)))
+    prompt = (f"Instrumental children's cartoon background score, warm, bright, and gentle. "
+              f"Matches the mood of a story titled '{title}' whose lesson is: {lesson}. "
+              f"No vocals, no lyrics — instrumental only, suitable to sit quietly under dialogue.")
+    body = json.dumps({"prompt": prompt, "music_length_ms": duration_ms}).encode()
+    req = urllib.request.Request("https://api.elevenlabs.io/v1/music", data=body,
+        headers={"xi-api-key": key, "Content-Type": "application/json", "Accept": "audio/mpeg"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=180) as r:
+            data = r.read()
+    except Exception as e:
+        loud(f"episode music generation failed, continuing without score: {e}")
+        return
+    if len(data) < MIN_MUSIC_BYTES:
+        loud(f"episode music response too small ({len(data)}B), continuing without score")
+        return
+    os.makedirs(os.path.dirname(MUSIC_PATH), exist_ok=True)
+    with open(MUSIC_PATH, "wb") as f:
+        f.write(data)
+    info(f"episode music ready: {MUSIC_PATH} ({len(data)//1024} KB)")
 
 
 def run_postmaster(ep):
@@ -258,6 +303,7 @@ def run_episode(ep):
         t_sc = time.time()
         run_scene(ep, scene, governor)
         scene_times.append((scene["scene_number"], time.time() - t_sc))
+    run_music(ep)
     run_postmaster(ep)
     _write_report(ep, t_start, time.time(), scene_times)
 

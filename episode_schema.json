@@ -88,7 +88,9 @@
           "motion_prompts",
           "dialogue",
           "dialogue_word_count",
-          "sfx"
+          "sfx",
+          "pose_library",
+          "camera_motion"
         ],
         "properties": {
           "scene_number": {
@@ -195,6 +197,40 @@
               "WIDE",
               "MEDIUM",
               "CLOSE"
+            ]
+          },
+          "pose_library": {
+            "description": "CONSUMER: pose-conditioned render path (Wan2.2 Fun Control). 'standing_neutral' with camera_motion='static' routes to the cheap plain-S2V path instead — only pay for the heavier action pipeline when a scene actually needs it.",
+            "enum": [
+              "standing_neutral",
+              "walking",
+              "sitting",
+              "waving",
+              "pointing",
+              "mountain_pose",
+              "tree_pose",
+              "warrior_one",
+              "cat_cow",
+              "butterfly_pose",
+              "seated_breathing"
+            ]
+          },
+          "camera_motion": {
+            "description": "CONSUMER: Wan2.2 Fun Camera Control. 'static' is free (no camera-control pass needed).",
+            "enum": [
+              "static",
+              "pan_left",
+              "pan_right",
+              "pan_up",
+              "pan_down",
+              "zoom_in",
+              "zoom_out",
+              "dolly_in",
+              "dolly_out",
+              "tilt_up",
+              "tilt_down",
+              "orbit_left",
+              "orbit_right"
             ]
           },
           "keyframe_prompt": {
@@ -335,6 +371,36 @@
       "COACH NIA": "woman, tan skin, dark hair in a high ponytail with a pink headband, athletic build, teal tank top and leggings with coral piping, gold whistle on wrist",
       "MR PIP": "elderly man, tan skin, bald with white hair on the sides, bushy white mustache, round friendly face, pencil tucked behind ear, teal polo shirt under a beige work apron with a tool pocket, teal pants, brown work shoes"
     },
+    "pose_library": [
+      "standing_neutral",
+      "walking",
+      "sitting",
+      "waving",
+      "pointing",
+      "mountain_pose",
+      "tree_pose",
+      "warrior_one",
+      "cat_cow",
+      "butterfly_pose",
+      "seated_breathing"
+    ],
+    "camera_motion_library": [
+      "static",
+      "pan_left",
+      "pan_right",
+      "pan_up",
+      "pan_down",
+      "zoom_in",
+      "zoom_out",
+      "dolly_in",
+      "dolly_out",
+      "tilt_up",
+      "tilt_down",
+      "orbit_left",
+      "orbit_right"
+    ],
+    "cheap_path_pose": "standing_neutral",
+    "cheap_path_camera": "static",
     "sfx_library": [
       "door_knock",
       "door_open",
@@ -379,6 +445,7 @@
     "assets": {
       "characters_dir": "/opt/pipeline/assets/characters",
       "sfx_dir": "/opt/pipeline/assets/sfx",
+      "poses_dir": "/opt/pipeline/assets/poses",
       "audio_out_dir": "/models/input/episode_audio",
       "schema_path": "/opt/pipeline/episode_schema.json",
       "scenes_out_dir": "/models/output/scenes",

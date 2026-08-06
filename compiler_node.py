@@ -132,7 +132,23 @@ VISUAL QUALITY RULES — these affect what actually renders, follow them exactly
    speaker=NONE, dialogue="NONE", and motion_prompts that explicitly describe
    near-total stillness ("holds completely still", "no movement", "a single
    held breath, otherwise motionless") rather than any real action. Pick the
-   chunk count closest to the requested hold duration."""
+   chunk count closest to the requested hold duration.
+
+7. pose_library — pick the entry that best matches what the character is
+   PHYSICALLY DOING in this scene, from: standing_neutral, walking, sitting,
+   waving, pointing, mountain_pose, tree_pose, warrior_one, cat_cow,
+   butterfly_pose, seated_breathing. Default to standing_neutral for plain
+   talking scenes with no described physical action — picking anything else
+   routes the scene through a heavier, slower, more expensive render path, so
+   only use it when the script actually describes that action/pose.
+
+8. camera_motion — pick from: static, pan_left, pan_right, pan_up, pan_down,
+   zoom_in, zoom_out, dolly_in, dolly_out, tilt_up, tilt_down, orbit_left,
+   orbit_right. Default to static unless the input script explicitly
+   describes camera movement (e.g. "camera slowly zooms in", "pans across
+   the room") — like pose_library, non-static values cost more to render, so
+   don't invent camera movement the script didn't ask for. If the script
+   explicitly says the camera never moves, always use static."""
 
 class EpisodeCompile:
     @classmethod

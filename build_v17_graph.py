@@ -142,6 +142,94 @@ def scene_template(ep, scene, anchor_image="anchor_current.png"):
     return G
 
 
+def _needs_action_path(scene):
+    """Cheap-path scenes (just standing, static camera) keep using the plain
+    S2V scene_template above — only pay for the heavier pose/camera/decoupled
+    lip-sync pipeline when a scene actually asks for real motion."""
+    return scene.get("pose_library", "standing_neutral") != "standing_neutral" \
+        or scene.get("camera_motion", "static") != "static"
+
+
+def scene_template_action(ep, scene, anchor_image="anchor_current.png"):
+    """
+    ================================ R&D — READ ME ============================
+    Full action/camera path for scenes with real pose/camera_motion. Built
+    from research (Kijai's ComfyUI-WanVideoWrapper for Fun Control / Fun
+    Camera Control, ShmuelRonen's ComfyUI-LatentSyncWrapper for a decoupled
+    lip-sync overlay), NOT verified against a live install — this is the
+    architecture-upgrade R&D phase, and the first real GPU submission is
+    expected to need adjustment here. If nodes come back red / errored:
+    check ComfyUI's /object_info on the running instance for the ACTUAL
+    registered class_types and input names from these two packages and
+    correct the class_type/input strings below accordingly. Everything
+    upstream of this (Kontext keyframe, anchor loading) is the same
+    proven code as scene_template() — only the motion stage differs.
+    =============================================================================
+
+    Sequence: Kontext keyframe (same as scene_template) -> [pose pass if
+    pose_library != standing_neutral] -> [camera pass if camera_motion !=
+    static, chained after the pose pass's output if both apply] -> LatentSync
+    lip-sync overlay using the TTS audio -> save scene mp4 (same VHS node/
+    naming convention as scene_template, so watchdog/postmaster don't need
+    to know which path rendered a given scene).
+    """
+    G, N, L = _graph()
+    ep_json = json.dumps(ep)
+    n = scene["scene_number"]
+    pose_name = scene.get("pose_library", "standing_neutral")
+    cam_motion = scene.get("camera_motion", "static")
+
+    kx = _kontext_loaders(N, L)
+    anc_img = N("LoadImage", {"image": anchor_image}, "ANCHOR (loaded)")
+    anc_lat = N("VAEEncode", {"pixels": L(anc_img, 0), "vae": L(kx["kxv"])}, "anchor->lat")
+    kf = _kontext_keyframe(N, L, kx, L(anc_lat), scene["keyframe_prompt"], f" {n}")
+    k480 = N("ImageScale", {"image": L(kf), "upscale_method": "lanczos", "width": 832, "height": 480, "crop": "center"}, "->832x480")
+    motion_text = " ".join(scene["motion_prompts"])
+    current_video = None  # tracks the running silent-video output through the chain
+
+    if pose_name != "standing_neutral":
+        pose_ref = N("PoseRefLoader", {"pose_library": pose_name}, "pose ref")
+        pose_model_hi = N("UNETLoader", {"unet_name": "diffusion_pytorch_model.safetensors", "weight_dtype": "default"}, "FunControl hi (VERIFY PATH)")
+        # NOTE: both high/low-noise Fun Control weights currently land as
+        # diffusion_pytorch_model.safetensors from their own HF repo folders
+        # (see entrypoint.sh) — rename on download or disambiguate by
+        # subfolder once tested; using one placeholder loader for now.
+        pose_pos = N("CLIPTextEncode", {"clip": L(kx["kxc"]), "text": motion_text}, "FunControl pos")
+        pose_sampler = N("WanVideoSampler", {  # VERIFY: exact WanVideoWrapper sampler node/inputs
+            "model": L(pose_model_hi), "positive": L(pose_pos), "negative": L(kx["kneg"]),
+            "start_image": L(k480, 0), "control_image": L(pose_ref, 0),
+            "width": 832, "height": 480, "length": 77, "steps": 6, "cfg": 1.0}, "pose pass")
+        current_video = L(pose_sampler, 0)
+
+    if cam_motion != "static":
+        cam_model_hi = N("UNETLoader", {"unet_name": "diffusion_pytorch_model.safetensors", "weight_dtype": "default"}, "FunCamera hi (VERIFY PATH)")
+        cam_embed = N("WanCameraEmbedding", {"camera_motion": cam_motion, "width": 832, "height": 480, "length": 77}, "camera embed")
+        cam_start = current_video if current_video else L(k480, 0)
+        cam_video = N("WanCameraImageToVideo", {  # VERIFY: exact WanVideoWrapper input names
+            "model": L(cam_model_hi), "start_image": cam_start, "camera_embedding": L(cam_embed, 0),
+            "width": 832, "height": 480, "length": 77, "steps": 6, "cfg": 1.0}, "camera pass")
+        current_video = L(cam_video, 0)
+
+    if current_video is None:
+        # neither pose nor camera actually requested — caller should have
+        # routed to the cheap scene_template() instead; fail loudly rather
+        # than silently rendering nothing
+        raise ValueError(f"scene_template_action called for scene {n} with no pose/camera motion requested")
+
+    tts = N("RenReedTTS", {"episode_json": ep_json, "scene_number": n}, "TTS (loud)")
+    lipsync = N("LatentSyncNode", {  # VERIFY: exact ComfyUI-LatentSyncWrapper node/input names
+        "video": current_video, "audio": L(tts, 0), "video_frame_rate": 16}, "lip-sync overlay")
+
+    f1 = N("ImageFromBatch", {"image": L(lipsync, 0), "batch_index": 1, "length": 1}, "frame1")
+    rest = N("ImageFromBatch", {"image": L(lipsync, 0), "batch_index": 1, "length": 384}, "f1..384")
+    fix = N("ImageBatch", {"image1": L(f1), "image2": L(rest)}, "fixed 385")
+    N("VHS_VideoCombine", {"frame_rate": 16, "loop_count": 0, "filename_prefix": "scenes/scene",
+        "format": "video/h264-mp4", "pix_fmt": "yuv420p", "crf": 17, "save_metadata": False,
+        "trim_to_audio": True, "pingpong": False, "save_output": True,
+        "images": L(fix), "audio": L(tts, 0)}, "save scene mp4")
+    return G
+
+
 def postmaster_template(ep, scenes_dir=SCENES_DIR):
     """Final concat + grade + SFX mux. No PathAfter gate — watchdog only submits
     this after confirming every scene file exists, so ordering is already safe."""
@@ -174,13 +262,16 @@ if __name__ == "__main__":
                     "location": "X", "time_of_day": "DAY", "characters": ["REN"], "speaker": "NONE",
                     "wardrobe": {"carry": True}, "shot": "WIDE",
                     "keyframe_prompt": STYLE_ANCHOR + ". sample scene, wide shot.",
-                    "motion_prompts": ["a", "b"], "dialogue": "NONE", "dialogue_word_count": 0, "sfx": []}],
+                    "motion_prompts": ["a", "b"], "dialogue": "NONE", "dialogue_word_count": 0, "sfx": [],
+                    "pose_library": "tree_pose", "camera_motion": "zoom_in"}],
         "totals": {"sum_chunks": 2, "sum_duration_s": 9.625, "total_frames_16fps": 154},
     }
     json.dump(anchor_template(sample_ep), open("sample_anchor_api.json", "w"), indent=1)
     json.dump(scene_template(sample_ep, sample_ep["scenes"][0]), open("sample_scene_api.json", "w"), indent=1)
+    json.dump(scene_template_action(sample_ep, sample_ep["scenes"][0]), open("sample_scene_action_api.json", "w"), indent=1)
     json.dump(postmaster_template(sample_ep), open("sample_postmaster_api.json", "w"), indent=1)
     for name, g in [("trigger", trigger_template()), ("anchor", anchor_template(sample_ep)),
                     ("scene", scene_template(sample_ep, sample_ep["scenes"][0])),
+                    ("scene_action", scene_template_action(sample_ep, sample_ep["scenes"][0])),
                     ("postmaster", postmaster_template(sample_ep))]:
         print(f"{name}: {len(g)} nodes")

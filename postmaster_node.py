@@ -7,11 +7,15 @@ writes final into ComfyUI output dir, returns inline player + download.
 import os, json, subprocess, shutil
 
 SFX_DIR = os.environ.get("SFX_ASSET_DIR", "/opt/pipeline/assets/sfx")
+MUSIC_PATH = os.environ.get("EPISODE_MUSIC_PATH", "/models/output/episode_music.mp3")
+MUSIC_VOLUME = 0.2  # ducked well under dialogue/SFX
 GRADE = "fps=24,scale=1280:720:flags=lanczos,eq=contrast=1.06:saturation=1.14:gamma=0.98," \
         "unsharp=5:5:0.45:5:5:0.0,noise=alls=1.5:allf=t,format=yuv420p"
 
-def build_sfx_cmd(src, ep, out, sfx_dir=None, grade=GRADE):
+def build_sfx_cmd(src, ep, out, sfx_dir=None, grade=GRADE, music_path=None):
     sfx_dir = sfx_dir or SFX_DIR
+    music_path = music_path if music_path is not None else MUSIC_PATH
+    has_music = bool(music_path and os.path.isfile(music_path))
     events = []
     for sc in ep["scenes"]:
         for fx in sc["sfx"]:
@@ -21,10 +25,19 @@ def build_sfx_cmd(src, ep, out, sfx_dir=None, grade=GRADE):
             events.append((round(sc["start_time_s"] + fx["at_s"], 3), p))
     cmd = ["ffmpeg", "-y", "-v", "error", "-i", src]
     for _, p in events: cmd += ["-i", p]
-    if events:
+    music_idx = None
+    if has_music:
+        music_idx = len(events) + 1
+        cmd += ["-i", music_path]
+    n_inputs = 1 + len(events) + (1 if has_music else 0)
+    if events or has_music:
         parts = [f"[{i+1}:a]adelay={int(t*1000)}|{int(t*1000)}[fx{i}]" for i, (t, _) in enumerate(events)]
-        mix_in = "[0:a]" + "".join(f"[fx{i}]" for i in range(len(events)))
-        fc = ";".join(parts) + f";{mix_in}amix=inputs={len(events)+1}:duration=first:normalize=0[aout]"
+        mix_labels = "[0:a]" + "".join(f"[fx{i}]" for i in range(len(events)))
+        if has_music:
+            # loop (in case shorter than episode) + duck under dialogue/SFX
+            parts.append(f"[{music_idx}:a]aloop=loop=-1:size=2e9,volume={MUSIC_VOLUME}[music]")
+            mix_labels += "[music]"
+        fc = ";".join(parts) + f";{mix_labels}amix=inputs={n_inputs}:duration=first:normalize=0[aout]"
         cmd += ["-filter_complex", fc, "-map", "0:v", "-map", "[aout]"]
     else:
         cmd += ["-map", "0:v", "-map", "0:a?"]
