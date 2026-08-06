@@ -89,7 +89,7 @@
           "dialogue",
           "dialogue_word_count",
           "sfx",
-          "pose_library",
+          "has_physical_action",
           "camera_motion"
         ],
         "properties": {
@@ -199,21 +199,9 @@
               "CLOSE"
             ]
           },
-          "pose_library": {
-            "description": "CONSUMER: pose-conditioned render path (Wan2.2 Fun Control). 'standing_neutral' with camera_motion='static' routes to the cheap plain-S2V path instead — only pay for the heavier action pipeline when a scene actually needs it.",
-            "enum": [
-              "standing_neutral",
-              "walking",
-              "sitting",
-              "waving",
-              "pointing",
-              "mountain_pose",
-              "tree_pose",
-              "warrior_one",
-              "cat_cow",
-              "butterfly_pose",
-              "seated_breathing"
-            ]
+          "has_physical_action": {
+            "description": "CONSUMER: routing between the cheap talking-only S2V path and the heavier general I2V action path (Wan2.2 I2V, text-driven via motion_prompts — works for ANY described action on ANY topic, not a fixed pose list). False with camera_motion='static' = cheap path. True = character does real physical movement beyond standing/talking (walking, cooking, playing, dancing, riding, anything the script actually describes) — motion_prompts already carries the free-text description, this is just the cost-routing flag.",
+            "type": "boolean"
           },
           "camera_motion": {
             "description": "CONSUMER: Wan2.2 Fun Camera Control. 'static' is free (no camera-control pass needed).",
@@ -271,38 +259,9 @@
               ],
               "properties": {
                 "name": {
-                  "enum": [
-                    "door_knock",
-                    "door_open",
-                    "door_close",
-                    "footsteps_grass",
-                    "footsteps_floor",
-                    "dog_bark",
-                    "cat_meow",
-                    "birds_chirp",
-                    "wind_soft",
-                    "rain_light",
-                    "thunder_soft",
-                    "water_splash",
-                    "ball_bounce",
-                    "bicycle_bell",
-                    "school_bell",
-                    "phone_chime",
-                    "pop",
-                    "whoosh",
-                    "sparkle",
-                    "magic_chime",
-                    "crowd_kids_laugh",
-                    "yawn",
-                    "giggle",
-                    "gasp",
-                    "boing",
-                    "thud_soft",
-                    "paper_rustle",
-                    "zip",
-                    "car_pass_soft",
-                    "kitchen_sizzle"
-                  ]
+                  "description": "CONSUMER: watchdog.ensure_sfx_library() — free string, snake_case, e.g. 'door_knock'. Tries x_constants.sfx_library / assets/sfx/ first; if the exact name isn't already baked, generates it on demand via ElevenLabs sound-generation and adds it to the library for reuse. NOT a fixed/closed list — any topic can need any sound.",
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_]{1,40}$"
                 },
                 "at_s": {
                   "type": "number",
@@ -371,19 +330,6 @@
       "COACH NIA": "woman, tan skin, dark hair in a high ponytail with a pink headband, athletic build, teal tank top and leggings with coral piping, gold whistle on wrist",
       "MR PIP": "elderly man, tan skin, bald with white hair on the sides, bushy white mustache, round friendly face, pencil tucked behind ear, teal polo shirt under a beige work apron with a tool pocket, teal pants, brown work shoes"
     },
-    "pose_library": [
-      "standing_neutral",
-      "walking",
-      "sitting",
-      "waving",
-      "pointing",
-      "mountain_pose",
-      "tree_pose",
-      "warrior_one",
-      "cat_cow",
-      "butterfly_pose",
-      "seated_breathing"
-    ],
     "camera_motion_library": [
       "static",
       "pan_left",
@@ -399,7 +345,6 @@
       "orbit_left",
       "orbit_right"
     ],
-    "cheap_path_pose": "standing_neutral",
     "cheap_path_camera": "static",
     "sfx_library": [
       "door_knock",
@@ -445,7 +390,6 @@
     "assets": {
       "characters_dir": "/opt/pipeline/assets/characters",
       "sfx_dir": "/opt/pipeline/assets/sfx",
-      "poses_dir": "/opt/pipeline/assets/poses",
       "audio_out_dir": "/models/input/episode_audio",
       "schema_path": "/opt/pipeline/episode_schema.json",
       "scenes_out_dir": "/models/output/scenes",

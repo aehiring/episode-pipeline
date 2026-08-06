@@ -12,17 +12,21 @@ else pip install -q "huggingface_hub[cli]" && HF="hf"; fi
 echo "using downloader: $HF"
 FAILED=0
 
-get() {  # get <repo> <path-in-repo> <dest-dir>
-  local repo="$1" path="$2" dir="$3" name dest
-  name="$(basename "$path")"; dest="$dir/$name"
-  [ -s "$dest" ] && { echo "  ok   $name"; return 0; }
-  echo "  pull $name"
+get() {  # get <repo> <path-in-repo> <dest-dir> [rename-to]
+  # rename-to matters when a repo's high/low-noise files share the same
+  # generic basename (e.g. alibaba-pai's Fun-Control repos both call the
+  # file "diffusion_pytorch_model.safetensors" regardless of subfolder) —
+  # without renaming, the second download silently overwrites the first.
+  local repo="$1" path="$2" dir="$3" rename="${4:-}" name dest
+  name="$(basename "$path")"; dest="$dir/${rename:-$name}"
+  [ -s "$dest" ] && { echo "  ok   $(basename "$dest")"; return 0; }
+  echo "  pull $(basename "$dest")"
   rm -rf /tmp/hf && mkdir -p /tmp/hf
   if ! $HF download "$repo" "$path" --local-dir /tmp/hf >/dev/null; then
-    echo "  FAIL $name (repo=$repo)"; FAILED=$((FAILED+1)); return 1; fi
+    echo "  FAIL $(basename "$dest") (repo=$repo)"; FAILED=$((FAILED+1)); return 1; fi
   local src; src="$(find /tmp/hf -type f -name "$name" | head -n1)"
-  [ -z "$src" ] && { echo "  FAIL $name (not found after download)"; FAILED=$((FAILED+1)); return 1; }
-  mv "$src" "$dest"; echo "  done $name ($(du -h "$dest" | cut -f1))"
+  [ -z "$src" ] && { echo "  FAIL $(basename "$dest") (not found after download)"; FAILED=$((FAILED+1)); return 1; }
+  mv "$src" "$dest"; echo "  done $(basename "$dest") ($(du -h "$dest" | cut -f1))"
 }
 
 echo "== models =="
@@ -66,19 +70,26 @@ lget(){ # lget <url> <dest> <min_bytes>
 lget "https://huggingface.co/lightx2v/Wan2.2-Lightning/resolve/main/Wan2.2-T2V-A14B-4steps-lora-rank64-Seko-V1.1/high_noise_model.safetensors" \
      "$M/loras/wan22_lightning_fallback_high.safetensors" 400000000
 
-# ── v18 action/camera upgrade: Fun Camera Control + Fun Control (pose) ──
-# NOTE: dual high/low-noise mixture-of-experts models (unlike single-model S2V
-# above) — confirm exact filenames/repo still match once actually tested;
-# this is the R&D phase flagged in the architecture plan, not a locked spec.
+# ── v18 action/camera upgrade ──
+# Two capabilities, both optional/best-effort (entrypoint continues on
+# failure per the || true + FAILED-counter pattern already used above —
+# watchdog's ensure_models() can also retry these later at runtime without
+# a reboot, see watchdog.py):
+# 1. General topic-agnostic ACTION: native ComfyUI WanImageToVideo (same
+#    Comfy-Org repo already used for S2V) — no fixed pose list, follows
+#    whatever motion_prompts describes, on any topic.
+get "$C" split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors "$M/diffusion_models" || true
+get "$C" split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors  "$M/diffusion_models" || true
+# 2. CAMERA motion specifically (pan/zoom/tilt/dolly/orbit) — a real
+#    dual high/low-noise model pair, renamed on download since alibaba-pai's
+#    repo uses the same generic filename for both (would silently collide
+#    without the rename).
 CAM=alibaba-pai/Wan2.2-Fun-A14B-Control-Camera
-get "$CAM" high_noise_model/diffusion_pytorch_model.safetensors "$M/diffusion_models" || true
-get "$CAM" low_noise_model/diffusion_pytorch_model.safetensors  "$M/diffusion_models" || true
-POSE=alibaba-pai/Wan2.2-Fun-A14B-Control
-get "$POSE" high_noise_model/diffusion_pytorch_model.safetensors "$M/diffusion_models" || true
-get "$POSE" low_noise_model/diffusion_pytorch_model.safetensors  "$M/diffusion_models" || true
+get "$CAM" high_noise_model/diffusion_pytorch_model.safetensors "$M/diffusion_models" "wan2.2_fun_camera_high_noise_14B.safetensors" || true
+get "$CAM" low_noise_model/diffusion_pytorch_model.safetensors  "$M/diffusion_models" "wan2.2_fun_camera_low_noise_14B.safetensors"  || true
 LX2V=lightx2v/Wan2.2-Lightning
-get "$LX2V" Wan2.2-I2V-A14B-4steps-lora-rank64-V1/high_noise_model.safetensors "$M/loras" || true
-get "$LX2V" Wan2.2-I2V-A14B-4steps-lora-rank64-V1/low_noise_model.safetensors  "$M/loras" || true
+get "$LX2V" Wan2.2-I2V-A14B-4steps-lora-rank64-V1/high_noise_model.safetensors "$M/loras" "wan22_i2v_lightx2v_4steps_high_noise.safetensors" || true
+get "$LX2V" Wan2.2-I2V-A14B-4steps-lora-rank64-V1/low_noise_model.safetensors  "$M/loras" "wan22_i2v_lightx2v_4steps_low_noise.safetensors"  || true
 echo "  note: LatentSync lip-sync model — ComfyUI-LatentSyncWrapper node fetches its own checkpoint on first use; verify on first real run"
 
 # ── input dir: LoadAudio-class nodes resolve against ComfyUI/input ──

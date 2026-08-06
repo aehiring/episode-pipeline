@@ -55,6 +55,24 @@ def _wan_loaders(N, L):
     return {"s2v_model": s2v_m, "wclip": wclip, "wvae": wvae, "aenc": aenc, "wneg": wneg}
 
 
+def _wan_i2v_loaders(N, L):
+    """Wan2.2 I2V dual-expert (high-noise/low-noise MoE) stack for the general
+    action path — ANY physical action on ANY topic, driven by motion_prompts
+    free text (no fixed pose list). Native ComfyUI nodes only; the camera-
+    motion variant (WanCameraImageToVideo) reuses this same model/lora pair,
+    just swapping which conditioning node feeds the samplers below."""
+    hi_u = N("UNETLoader", {"unet_name": "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors", "weight_dtype": "default"}, "I2V UNET hi")
+    hi_l = N("LoraLoaderModelOnly", {"model": L(hi_u),
+        "lora_name": "wan22_i2v_lightx2v_4steps_high_noise.safetensors", "strength_model": 1.0}, "I2V LoRA hi")
+    lo_u = N("UNETLoader", {"unet_name": "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors", "weight_dtype": "default"}, "I2V UNET lo")
+    lo_l = N("LoraLoaderModelOnly", {"model": L(lo_u),
+        "lora_name": "wan22_i2v_lightx2v_4steps_low_noise.safetensors", "strength_model": 1.0}, "I2V LoRA lo")
+    wclip = N("CLIPLoader", {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan", "device": "default"}, "Wan CLIP (i2v)")
+    wvae  = N("VAELoader", {"vae_name": "wan_2.1_vae.safetensors"}, "Wan VAE (i2v)")
+    wneg  = N("CLIPTextEncode", {"clip": L(wclip), "text": "blurry, static, frozen, jerky motion, deformed hands, text, watermark"}, "Wan neg (i2v)")
+    return {"hi": hi_l, "lo": lo_l, "wclip": wclip, "wvae": wvae, "wneg": wneg}
+
+
 def _kontext_loaders(N, L):
     kxu  = N("UNETLoader", {"unet_name": "flux1-dev-kontext_fp8_scaled.safetensors", "weight_dtype": "default"}, "Kontext UNET")
     kxc  = N("DualCLIPLoader", {"clip_name1": "clip_l.safetensors", "clip_name2": "t5xxl_fp8_e4m3fn_scaled.safetensors", "type": "flux", "device": "default"}, "FLUX CLIP")
@@ -150,39 +168,47 @@ def scene_template(ep, scene, anchor_image="anchor_current.png"):
 
 def _needs_action_path(scene):
     """Cheap-path scenes (just standing, static camera) keep using the plain
-    S2V scene_template above — only pay for the heavier pose/camera/decoupled
-    lip-sync pipeline when a scene actually asks for real motion."""
-    return scene.get("pose_library", "standing_neutral") != "standing_neutral" \
+    S2V scene_template above — only pay for the heavier general I2V action/
+    camera/decoupled-lip-sync pipeline when a scene actually asks for real
+    motion. has_physical_action is a free-text-backed flag (motion_prompts
+    already carries whatever the script describes, any topic) — NOT a fixed
+    pose list."""
+    return scene.get("has_physical_action", False) \
         or scene.get("camera_motion", "static") != "static"
 
 
 def scene_template_action(ep, scene, anchor_image="anchor_current.png"):
     """
     ================================ R&D — READ ME ============================
-    Full action/camera path for scenes with real pose/camera_motion. Built
-    from research (Kijai's ComfyUI-WanVideoWrapper for Fun Control / Fun
-    Camera Control, ShmuelRonen's ComfyUI-LatentSyncWrapper for a decoupled
-    lip-sync overlay), NOT verified against a live install — this is the
-    architecture-upgrade R&D phase, and the first real GPU submission is
-    expected to need adjustment here. If nodes come back red / errored:
-    check ComfyUI's /object_info on the running instance for the ACTUAL
-    registered class_types and input names from these two packages and
-    correct the class_type/input strings below accordingly. Everything
-    upstream of this (Kontext keyframe, anchor loading) is the same
-    proven code as scene_template() — only the motion stage differs.
-    =============================================================================
+    Full action/camera path for scenes with has_physical_action and/or a
+    non-static camera_motion. Uses Wan2.2's native, general-purpose I2V
+    conditioning (WanImageToVideo — ships with core ComfyUI, text-driven via
+    motion_prompts, follows ANY described action on ANY topic — no fixed
+    pose list), or WanCameraImageToVideo (Kijai's ComfyUI-WanVideoWrapper,
+    Fun Camera Control) when camera movement is requested — that node also
+    takes the same free-text positive conditioning, so one pass covers both
+    "character does X" and "camera does Y" together rather than chaining two
+    separate motion passes. Dual high/low-noise MoE KSamplerAdvanced pattern
+    (matches the LightX2V 4-step lora pair downloaded in entrypoint.sh).
+    ShmuelRonen's ComfyUI-LatentSyncWrapper then overlays the TTS audio as a
+    decoupled lip-sync pass (silent motion first, mouth-sync after — the
+    video model isn't fighting body motion and mouth accuracy at once).
 
-    Sequence: Kontext keyframe (same as scene_template) -> [pose pass if
-    pose_library != standing_neutral] -> [camera pass if camera_motion !=
-    static, chained after the pose pass's output if both apply] -> LatentSync
-    lip-sync overlay using the TTS audio -> save scene mp4 (same VHS node/
-    naming convention as scene_template, so watchdog/postmaster don't need
-    to know which path rendered a given scene).
+    The camera-embedding and lip-sync nodes are NOT yet verified against a
+    live ComfyUI install — check /object_info on the running instance for
+    the ACTUAL registered class_type/input names if these come back red on
+    the first real GPU submission; watchdog.ensure_models() cannot fix a
+    wrong node/input name, only a missing model file, so a node-shape
+    mismatch here is the one thing that would still need a manual code
+    patch (not a reboot) mid-run. WanImageToVideo itself is native/core
+    ComfyUI, so that half is expected to work as written. Everything
+    upstream (Kontext keyframe, anchor loading) is the same proven code as
+    scene_template() — only the motion stage differs.
+    =============================================================================
     """
     G, N, L = _graph()
     ep_json = json.dumps(ep)
     n = scene["scene_number"]
-    pose_name = scene.get("pose_library", "standing_neutral")
     cam_motion = scene.get("camera_motion", "static")
     total_frames = scene["chunks"] * 77  # same chunk-accurate length as scene_template — never hardcode 77/385
 
@@ -192,40 +218,34 @@ def scene_template_action(ep, scene, anchor_image="anchor_current.png"):
     kf = _kontext_keyframe(N, L, kx, L(anc_lat), scene["keyframe_prompt"], f" {n}")
     k480 = N("ImageScale", {"image": L(kf), "upscale_method": "lanczos", "width": 832, "height": 480, "crop": "center"}, "->832x480")
     motion_text = " ".join(scene["motion_prompts"])
-    current_video = None  # tracks the running silent-video output through the chain
 
-    if pose_name != "standing_neutral":
-        pose_ref = N("PoseRefLoader", {"pose_library": pose_name}, "pose ref")
-        pose_model_hi = N("UNETLoader", {"unet_name": "diffusion_pytorch_model.safetensors", "weight_dtype": "default"}, "FunControl hi (VERIFY PATH)")
-        # NOTE: both high/low-noise Fun Control weights currently land as
-        # diffusion_pytorch_model.safetensors from their own HF repo folders
-        # (see entrypoint.sh) — rename on download or disambiguate by
-        # subfolder once tested; using one placeholder loader for now.
-        pose_pos = N("CLIPTextEncode", {"clip": L(kx["kxc"]), "text": motion_text}, "FunControl pos")
-        pose_sampler = N("WanVideoSampler", {  # VERIFY: exact WanVideoWrapper sampler node/inputs
-            "model": L(pose_model_hi), "positive": L(pose_pos), "negative": L(kx["kneg"]),
-            "start_image": L(k480, 0), "control_image": L(pose_ref, 0),
-            "width": 832, "height": 480, "length": total_frames, "steps": 6, "cfg": 1.0}, "pose pass")
-        current_video = L(pose_sampler, 0)
+    i2v = _wan_i2v_loaders(N, L)
+    pos = N("CLIPTextEncode", {"clip": L(i2v["wclip"]), "text": motion_text}, "I2V pos")
 
     if cam_motion != "static":
-        cam_model_hi = N("UNETLoader", {"unet_name": "diffusion_pytorch_model.safetensors", "weight_dtype": "default"}, "FunCamera hi (VERIFY PATH)")
         cam_embed = N("WanCameraEmbedding", {"camera_motion": cam_motion, "width": 832, "height": 480, "length": total_frames}, "camera embed")
-        cam_start = current_video if current_video else L(k480, 0)
-        cam_video = N("WanCameraImageToVideo", {  # VERIFY: exact WanVideoWrapper input names
-            "model": L(cam_model_hi), "start_image": cam_start, "camera_embedding": L(cam_embed, 0),
-            "width": 832, "height": 480, "length": total_frames, "steps": 6, "cfg": 1.0}, "camera pass")
-        current_video = L(cam_video, 0)
+        cond = N("WanCameraImageToVideo", {  # VERIFY: exact WanVideoWrapper input names
+            "positive": L(pos), "negative": L(i2v["wneg"]), "vae": L(i2v["wvae"]),
+            "width": 832, "height": 480, "length": total_frames, "batch_size": 1,
+            "start_image": L(k480, 0), "camera_conditions": L(cam_embed, 0)}, "camera cond")
+    else:
+        cond = N("WanImageToVideo", {"positive": L(pos), "negative": L(i2v["wneg"]), "vae": L(i2v["wvae"]),
+            "width": 832, "height": 480, "length": total_frames, "batch_size": 1,
+            "start_image": L(k480, 0)}, "I2V cond")
 
-    if current_video is None:
-        # neither pose nor camera actually requested — caller should have
-        # routed to the cheap scene_template() instead; fail loudly rather
-        # than silently rendering nothing
-        raise ValueError(f"scene_template_action called for scene {n} with no pose/camera motion requested")
+    def KS(model, lat, add_noise, start, end, leftover, title):
+        return N("KSamplerAdvanced", {"model": model, "add_noise": add_noise, "noise_seed": 9,
+            "steps": 4, "cfg": 1.0, "sampler_name": "euler", "scheduler": "simple",
+            "positive": L(cond, 0), "negative": L(cond, 1), "latent_image": lat,
+            "start_at_step": start, "end_at_step": end, "return_with_leftover_noise": leftover}, title)
+
+    hi_pass = KS(L(i2v["hi"]), L(cond, 2), "enable", 0, 2, "enable", "KSA hi (MoE)")
+    lo_pass = KS(L(i2v["lo"]), L(hi_pass), "disable", 2, 10000, "disable", "KSA lo (MoE)")
+    dec = N("VAEDecode", {"samples": L(lo_pass), "vae": L(i2v["wvae"])}, f"decode {total_frames}f")
 
     tts = N("RenReedTTS", {"episode_json": ep_json, "scene_number": n}, "TTS (loud)")
     lipsync = N("LatentSyncNode", {  # VERIFY: exact ComfyUI-LatentSyncWrapper node/input names
-        "video": current_video, "audio": L(tts, 0), "video_frame_rate": 16}, "lip-sync overlay")
+        "video": L(dec), "audio": L(tts, 0), "video_frame_rate": 16}, "lip-sync overlay")
 
     f1 = N("ImageFromBatch", {"image": L(lipsync, 0), "batch_index": 1, "length": 1}, "frame1")
     rest = N("ImageFromBatch", {"image": L(lipsync, 0), "batch_index": 1, "length": total_frames - 1}, "f1..last")
@@ -270,7 +290,7 @@ if __name__ == "__main__":
                     "wardrobe": {"carry": True}, "shot": "WIDE",
                     "keyframe_prompt": STYLE_ANCHOR + ". sample scene, wide shot.",
                     "motion_prompts": ["a", "b"], "dialogue": "NONE", "dialogue_word_count": 0, "sfx": [],
-                    "pose_library": "tree_pose", "camera_motion": "zoom_in"}],
+                    "has_physical_action": True, "camera_motion": "zoom_in"}],
         "totals": {"sum_chunks": 2, "sum_duration_s": 9.625, "total_frames_16fps": 154},
     }
     json.dump(anchor_template(sample_ep), open("sample_anchor_api.json", "w"), indent=1)

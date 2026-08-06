@@ -13,7 +13,7 @@ unchanged from the prior observe-only watchdog.
 Env: COMFY_HOST, VAST_RATE_HR, EPISODE_CAP (default 5.50), EPISODE_COMPILED_PATH,
      SCENE_TIMEOUT_MINUTES (default 20), SCENE_MAX_RETRIES (default 2)
 """
-import os, sys, json, time, shutil, re, urllib.request, urllib.error
+import os, sys, json, time, shutil, re, urllib.request, urllib.error, urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_v17_graph as G
@@ -38,6 +38,9 @@ POLL_S = 5
 
 MIN_VIDEO_BYTES = 10000
 MIN_IMAGE_BYTES = 10000
+SFX_DIR = os.environ.get("SFX_ASSET_DIR", "/opt/pipeline/assets/sfx")
+MIN_SFX_BYTES = 6000
+_MUSIC_NOTE = None  # set by run_music(), surfaced in EPISODE_REPORT.txt instead of a loud console banner
 
 
 def get(path):
@@ -88,6 +91,182 @@ def checkpoint(scene, frame_path):
     os.makedirs(STATE, exist_ok=True)
     json.dump({"scene": scene, "last_frame": frame_path, "t": time.time()},
               open(os.path.join(STATE, "checkpoint.json"), "w"))
+
+
+# ── Model presence / runtime self-heal ─────────────────────────────────
+# Mirrors entrypoint.sh's model list in pure Python (huggingface_hub API,
+# no shell/CLI dependency) so a missing or corrupt/interrupted download can
+# be fixed DURING a run — no instance reboot needed, per explicit
+# requirement. Checked once at watchdog startup and again at the top of
+# every run_episode() (idempotent — a no-op once everything verifies OK).
+MODELS_ROOT = "/models"
+_C = "Comfy-Org/Wan_2.2_ComfyUI_Repackaged"
+_CAM = "alibaba-pai/Wan2.2-Fun-A14B-Control-Camera"
+_LX2V = "lightx2v/Wan2.2-Lightning"
+
+# (repo, path_in_repo, dest_relpath, min_bytes, required)
+# required=True blocks the episode if it can't be fixed; required=False is
+# the action/camera upgrade — best-effort, only scenes that need it are hit.
+HF_MODELS = [
+    (_C, "split_files/diffusion_models/wan2.2_s2v_14B_fp8_scaled.safetensors", "diffusion_models/wan2.2_s2v_14B_fp8_scaled.safetensors", 5_000_000_000, True),
+    (_C, "split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", 3_000_000_000, True),
+    (_C, "split_files/vae/wan_2.1_vae.safetensors", "vae/wan_2.1_vae.safetensors", 100_000_000, True),
+    (_C, "split_files/audio_encoders/wav2vec2_large_english_fp16.safetensors", "audio_encoders/wav2vec2_large_english_fp16.safetensors", 300_000_000, True),
+    ("Comfy-Org/flux1-schnell", "flux1-schnell-fp8.safetensors", "diffusion_models/flux1-schnell-fp8.safetensors", 10_000_000_000, True),
+    ("Comfy-Org/flux1-kontext-dev_ComfyUI", "split_files/diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors", "diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors", 10_000_000_000, True),
+    ("comfyanonymous/flux_text_encoders", "clip_l.safetensors", "text_encoders/clip_l.safetensors", 200_000_000, True),
+    ("comfyanonymous/flux_text_encoders", "t5xxl_fp8_e4m3fn_scaled.safetensors", "text_encoders/t5xxl_fp8_e4m3fn_scaled.safetensors", 3_000_000_000, True),
+    ("Kim2091/UltraSharp", "4x-UltraSharp.pth", "upscale_models/4x-UltraSharp.pth", 50_000_000, True),
+    (_C, "split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors", "diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors", 5_000_000_000, False),
+    (_C, "split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors", "diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors", 5_000_000_000, False),
+    (_CAM, "high_noise_model/diffusion_pytorch_model.safetensors", "diffusion_models/wan2.2_fun_camera_high_noise_14B.safetensors", 5_000_000_000, False),
+    (_CAM, "low_noise_model/diffusion_pytorch_model.safetensors", "diffusion_models/wan2.2_fun_camera_low_noise_14B.safetensors", 5_000_000_000, False),
+    (_LX2V, "Wan2.2-I2V-A14B-4steps-lora-rank64-V1/high_noise_model.safetensors", "loras/wan22_i2v_lightx2v_4steps_high_noise.safetensors", 200_000_000, False),
+    (_LX2V, "Wan2.2-I2V-A14B-4steps-lora-rank64-V1/low_noise_model.safetensors", "loras/wan22_i2v_lightx2v_4steps_low_noise.safetensors", 200_000_000, False),
+]
+
+# direct-URL fallbacks (entrypoint.sh's non-HF-API curl downloads)
+URL_MODELS = [
+    ("https://huggingface.co/ffxvs/vae-flux/resolve/main/ae.safetensors", "vae/ae.safetensors", 300_000_000, True),
+    ("https://huggingface.co/lightx2v/Wan2.2-Lightning/resolve/main/Wan2.2-T2V-A14B-4steps-lora-rank64-Seko-V1.1/high_noise_model.safetensors",
+     "loras/wan22_lightning_fallback_high.safetensors", 400_000_000, True),
+]
+
+_MODELS_VERIFIED_OK = False
+_last_models_check = 0.0
+MODELS_RECHECK_THROTTLE_S = 120  # don't hammer HF/network more than once per 2 min while broken
+# local_pipeline_test.py sets this — the CPU-only/zero-GPU-cost local test suite
+# must never trigger real multi-GB network downloads onto the dev machine.
+SKIP_MODEL_CHECK = os.environ.get("WATCHDOG_SKIP_MODEL_CHECK", "").strip() == "1"
+
+
+def _model_ok(dest, min_bytes):
+    return os.path.isfile(dest) and os.path.getsize(dest) >= min_bytes
+
+
+def _hf_download_one(repo, path_in_repo, dest):
+    from huggingface_hub import hf_hub_download  # same package entrypoint.sh already ensures is installed
+    tmp_dir = "/tmp/watchdog_hf"
+    os.makedirs(tmp_dir, exist_ok=True)
+    got = hf_hub_download(repo_id=repo, filename=path_in_repo, local_dir=tmp_dir)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    shutil.move(got, dest)
+
+
+def _url_download_one(url, dest):
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    with urllib.request.urlopen(url, timeout=600) as r, open(dest, "wb") as f:
+        shutil.copyfileobj(r, f)
+
+
+def ensure_models():
+    """Verify every model file entrypoint.sh should have fetched is present
+    and correctly sized; re-download anything missing/short right here in
+    Python. A no-op (single boolean check) once everything has verified OK,
+    and throttled to at most one real network retry pass per 2 minutes
+    while something is still broken, so a genuine outage doesn't turn into
+    a tight request loop."""
+    global _MODELS_VERIFIED_OK, _last_models_check
+    if _MODELS_VERIFIED_OK:
+        return
+    if SKIP_MODEL_CHECK:
+        info("ensure_models: WATCHDOG_SKIP_MODEL_CHECK=1 — skipping (local/offline test mode)")
+        _MODELS_VERIFIED_OK = True
+        return
+    now = time.time()
+    if now - _last_models_check < MODELS_RECHECK_THROTTLE_S:
+        return
+    _last_models_check = now
+    missing_required = []
+    for repo, path_in_repo, rel, min_bytes, required in HF_MODELS:
+        dest = os.path.join(MODELS_ROOT, rel)
+        if _model_ok(dest, min_bytes):
+            continue
+        info(f"ensure_models: {rel} missing/short ({'required' if required else 'optional action/camera'}) — fetching from {repo}")
+        try:
+            _hf_download_one(repo, path_in_repo, dest)
+            info(f"ensure_models: {rel} OK ({os.path.getsize(dest)//1024//1024} MB)")
+        except Exception as e:
+            msg = f"ensure_models: FAILED to fetch {rel} from {repo}: {e}"
+            if required:
+                loud(msg); missing_required.append(rel)
+            else:
+                info(msg + " — action/camera path unavailable until fixed; cheap talking-only scenes unaffected")
+    for url, rel, min_bytes, required in URL_MODELS:
+        dest = os.path.join(MODELS_ROOT, rel)
+        if _model_ok(dest, min_bytes):
+            continue
+        info(f"ensure_models: {rel} missing/short — fetching from {url}")
+        try:
+            _url_download_one(url, dest)
+            info(f"ensure_models: {rel} OK ({os.path.getsize(dest)//1024//1024} MB)")
+        except Exception as e:
+            msg = f"ensure_models: FAILED to fetch {rel} from {url}: {e}"
+            if required:
+                loud(msg); missing_required.append(rel)
+            else:
+                info(msg)
+    if missing_required:
+        raise RuntimeError(f"watchdog FATAL: required model(s) still missing after runtime retry: {missing_required}")
+    _MODELS_VERIFIED_OK = True
+    info("ensure_models: all required models verified OK")
+
+
+# ── Self-growing SFX library ───────────────────────────────────────────
+
+def _drop_sfx(ep, names):
+    """Strip sfx events we couldn't secure a file for, from every scene —
+    lets the episode finish (video+dialogue intact) instead of PostMaster
+    hard-failing on a missing mux input after all the GPU rendering is
+    already done."""
+    names = set(names)
+    for sc in ep["scenes"]:
+        sc["sfx"] = [fx for fx in sc["sfx"] if fx["name"] not in names]
+
+
+def ensure_sfx_library(ep):
+    """This pipeline renders ANY topic, so SFX can't be capped to one fixed
+    list: any sfx name this episode's scenes actually use, that isn't
+    already baked in SFX_DIR (the seed library or a prior episode's
+    on-demand additions), is generated now via ElevenLabs sound-generation
+    and added for reuse. A name that truly can't be generated (bad key, API
+    down) is dropped from its scene rather than failing the whole episode at
+    the final PostMaster mux step."""
+    names = sorted({fx["name"] for sc in ep["scenes"] for fx in sc["sfx"]})
+    if not names:
+        return
+    os.makedirs(SFX_DIR, exist_ok=True)
+    missing = [n for n in names if not _model_ok(os.path.join(SFX_DIR, n + ".mp3"), MIN_SFX_BYTES)]
+    if not missing:
+        info(f"sfx library: all {len(names)} sound(s) already present")
+        return
+    key = os.environ.get("ELEVENLABS_API_KEY", "").strip()
+    if not key:
+        loud(f"ELEVENLABS_API_KEY not set — cannot generate {len(missing)} new sfx {missing}; "
+             f"dropping these sfx events (video/dialogue unaffected)")
+        _drop_sfx(ep, missing)
+        return
+    info(f"sfx library: generating {len(missing)} new sound(s) on demand: {missing}")
+    failed = []
+    for name in missing:
+        prompt = name.replace("_", " ") + ", short cartoon sound effect, clean, family-friendly"
+        out = os.path.join(SFX_DIR, name + ".mp3")
+        try:
+            body = json.dumps({"text": prompt, "duration_seconds": 2.5, "prompt_influence": 0.5}).encode()
+            req = urllib.request.Request("https://api.elevenlabs.io/v1/sound-generation", data=body,
+                headers={"xi-api-key": key, "Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=60) as r:
+                data = r.read()
+            if len(data) < MIN_SFX_BYTES:
+                raise RuntimeError(f"response too small ({len(data)}B)")
+            with open(out, "wb") as f:
+                f.write(data)
+            info(f"sfx generated: {name} ({len(data)//1024} KB)")
+        except Exception as e:
+            loud(f"sfx generation failed for '{name}': {e} — dropping this sfx event")
+            failed.append(name)
+    if failed:
+        _drop_sfx(ep, failed)
 
 
 # ── ComfyUI API plumbing ──────────────────────────────────────────────
@@ -192,7 +371,7 @@ def run_scene(ep, scene, governor):
     build_graph = (lambda: G.scene_template_action(ep, scene, anchor_image=ANCHOR_LOCAL_NAME)) if use_action_path \
         else (lambda: G.scene_template(ep, scene, anchor_image=ANCHOR_LOCAL_NAME))
     if use_action_path:
-        info(f"scene {n}: pose={scene.get('pose_library')} camera={scene.get('camera_motion')} -> full action/camera path")
+        info(f"scene {n}: action={scene.get('has_physical_action')} camera={scene.get('camera_motion')} -> full action/camera path")
 
     last_err = None
     for attempt in range(1, MAX_RETRIES + 2):  # first try + MAX_RETRIES retries
@@ -221,22 +400,56 @@ def run_scene(ep, scene, governor):
     raise RuntimeError(f"watchdog FATAL: scene {n} failed after {MAX_RETRIES + 1} attempts. Last error: {last_err}")
 
 
-def run_music(ep):
-    """One score per episode via ElevenLabs Music — pure HTTP call, no GPU,
-    same shape as sfx_build.py's one-time-asset pattern but per-episode
-    instead of baked-once. Never fatal: if it fails or the key is missing,
-    log loudly and continue without a score rather than blocking the episode
-    (PostMaster already handles a missing music file gracefully)."""
-    if os.path.isfile(MUSIC_PATH) and os.path.getsize(MUSIC_PATH) >= MIN_MUSIC_BYTES:
-        info(f"episode music already present, skipping: {MUSIC_PATH}")
-        return
+JAMENDO_API = "https://api.jamendo.com/v3.0/tracks/"
+
+
+def _jamendo_search(client_id, **params):
+    q = urllib.parse.urlencode({"client_id": client_id, "format": "json", "limit": 5,
+        "vocalinstrumental": "instrumental", "order": "popularity_total", "audioformat": "mp31", **params})
+    with urllib.request.urlopen(f"{JAMENDO_API}?{q}", timeout=30) as r:
+        return json.loads(r.read().decode()).get("results", [])
+
+
+def _jamendo_music(ep):
+    """Real royalty-free track, queried by THIS episode's own title/lesson
+    text (whatever topic it actually is — never a hardcoded genre/mood), so
+    it's relevant per-episode rather than a fixed loop. Falls back to a
+    generic pleasant-instrumental search if the topic query has no matches."""
+    client_id = os.environ.get("JAMENDO_CLIENT_ID", "").strip()
+    if not client_id:
+        return None
+    query = f"{ep['episode'].get('title', '')} {ep['episode'].get('lesson', '')}".strip()
+    try:
+        results = _jamendo_search(client_id, search=query) if query else []
+        if not results:
+            info(f"Jamendo: no match for '{query}', trying generic pleasant-instrumental search")
+            results = _jamendo_search(client_id, tags="children happy")
+    except Exception as e:
+        info(f"Jamendo search failed: {e}")
+        return None
+    if not results:
+        return None
+    track = results[0]
+    audio_url = track.get("audio")
+    if not audio_url:
+        return None
+    try:
+        with urllib.request.urlopen(audio_url, timeout=60) as r:
+            audio = r.read()
+    except Exception as e:
+        info(f"Jamendo track download failed: {e}")
+        return None
+    if len(audio) < MIN_MUSIC_BYTES:
+        return None
+    return audio, track.get("name", "?"), track.get("artist_name", "?")
+
+
+def _elevenlabs_music(ep, duration_ms):
     key = os.environ.get("ELEVENLABS_API_KEY", "").strip()
     if not key:
-        loud("ELEVENLABS_API_KEY not set — skipping episode score (SFX/dialogue only)")
-        return
+        return None
     title = ep["episode"].get("title", "")
     lesson = ep["episode"].get("lesson", "")
-    duration_ms = min(600000, max(3000, int(ep["totals"]["sum_duration_s"] * 1000)))
     prompt = (f"Instrumental children's cartoon background score, warm, bright, and gentle. "
               f"Matches the mood of a story titled '{title}' whose lesson is: {lesson}. "
               f"No vocals, no lyrics — instrumental only, suitable to sit quietly under dialogue.")
@@ -247,15 +460,41 @@ def run_music(ep):
         with urllib.request.urlopen(req, timeout=180) as r:
             data = r.read()
     except Exception as e:
-        loud(f"episode music generation failed, continuing without score: {e}")
-        return
+        info(f"ElevenLabs Music fallback failed: {e}")
+        return None
     if len(data) < MIN_MUSIC_BYTES:
-        loud(f"episode music response too small ({len(data)}B), continuing without score")
+        return None
+    return data, "ElevenLabs generated score", "ElevenLabs"
+
+
+def run_music(ep):
+    """One background score per episode. Jamendo (free, real royalty-free
+    tracks, searched using THIS episode's own title/lesson so the result is
+    relevant to whatever topic it actually is) is tried first; ElevenLabs
+    Music is the fallback if Jamendo has no client id or no match. If both
+    fail, that's recorded as a plain note in EPISODE_REPORT.txt — NOT a loud
+    console failure banner — the episode still finishes with dialogue+SFX
+    only, since PostMaster's mix already tolerates a missing music file."""
+    global _MUSIC_NOTE
+    if os.path.isfile(MUSIC_PATH) and os.path.getsize(MUSIC_PATH) >= MIN_MUSIC_BYTES:
+        info(f"episode music already present, skipping: {MUSIC_PATH}")
         return
+    result = _jamendo_music(ep)
+    source = "Jamendo"
+    if result is None:
+        duration_ms = min(600000, max(3000, int(ep["totals"]["sum_duration_s"] * 1000)))
+        result = _elevenlabs_music(ep, duration_ms)
+        source = "ElevenLabs"
+    if result is None:
+        _MUSIC_NOTE = "No background score: Jamendo and ElevenLabs both unavailable/no match — episode has dialogue+SFX only."
+        info(_MUSIC_NOTE)
+        return
+    data, track_name, artist = result
     os.makedirs(os.path.dirname(MUSIC_PATH), exist_ok=True)
     with open(MUSIC_PATH, "wb") as f:
         f.write(data)
-    info(f"episode music ready: {MUSIC_PATH} ({len(data)//1024} KB)")
+    _MUSIC_NOTE = f"Background score: '{track_name}' by {artist} (via {source}), {len(data)//1024} KB, mixed quietly under dialogue/SFX."
+    info(f"episode music ready: {MUSIC_PATH} ({len(data)//1024} KB, via {source})")
 
 
 def run_postmaster(ep):
@@ -285,6 +524,8 @@ def _write_report(ep, t0, t1, scene_times):
         lines.append(f"  scene {n}: {dt/60:.2f} min")
     if RATE > 0:
         lines += ["", f"Estimated GPU cost: ${(total_s/3600)*RATE:.2f} at ${RATE}/hr"]
+    if _MUSIC_NOTE:
+        lines += ["", _MUSIC_NOTE]
     path = os.path.join(COMFY_OUTPUT, "EPISODE_REPORT.txt")
     with open(path, "w") as f:
         f.write("\n".join(lines) + "\n")
@@ -295,6 +536,8 @@ def run_episode(ep):
     n_scenes = ep["episode"]["scene_count"]
     if n_scenes != len(ep["scenes"]):
         raise RuntimeError(f"watchdog FATAL: episode.scene_count={n_scenes} but {len(ep['scenes'])} scenes present")
+    ensure_models()
+    ensure_sfx_library(ep)
     governor = Governor(ep["totals"]["total_frames_16fps"], RATE)
     t_start = time.time()
     run_anchor(ep)
@@ -311,16 +554,22 @@ def run_episode(ep):
 def main():
     info("v18 watchdog starting — orchestrator + observer")
     rate_check()
+    try:
+        ensure_models()
+    except RuntimeError as e:
+        loud(str(e) + " — will keep retrying at runtime, no reboot needed once fixed")
     seen_mtime = None
     while True:
         try:
             if os.path.isfile(COMPILED_PATH):
                 mtime = os.path.getmtime(COMPILED_PATH)
                 if seen_mtime is None or mtime > seen_mtime:
-                    seen_mtime = mtime
                     info(f"new episode detected: {COMPILED_PATH}")
                     ep = json.load(open(COMPILED_PATH))
                     run_episode(ep)
+                    seen_mtime = mtime  # only marked seen after a FULL successful run — every
+                    # step above (models, anchor, each scene, postmaster) is already idempotent
+                    # (skip-if-done), so retrying the whole episode on any failure is cheap/safe
         except RuntimeError as e:
             loud(str(e))
         except Exception as e:

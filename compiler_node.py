@@ -134,21 +134,36 @@ VISUAL QUALITY RULES — these affect what actually renders, follow them exactly
    held breath, otherwise motionless") rather than any real action. Pick the
    chunk count closest to the requested hold duration.
 
-7. pose_library — pick the entry that best matches what the character is
-   PHYSICALLY DOING in this scene, from: standing_neutral, walking, sitting,
-   waving, pointing, mountain_pose, tree_pose, warrior_one, cat_cow,
-   butterfly_pose, seated_breathing. Default to standing_neutral for plain
-   talking scenes with no described physical action — picking anything else
-   routes the scene through a heavier, slower, more expensive render path, so
-   only use it when the script actually describes that action/pose.
+7. has_physical_action — true if the character(s) do any real physical
+   movement beyond standing/talking in this scene (walking, cooking, playing,
+   dancing, riding, gesturing broadly, exercising, anything the script
+   actually describes) — this is a general-purpose flag, NOT a fixed pose
+   list, and applies to a scene on ANY topic. false for plain talking scenes
+   with no described physical action. When true, make sure motion_prompts
+   actually describes the specific action in concrete physical terms (what
+   moves, how) — that free text is what drives the render, there is no
+   separate pose selection step. true routes the scene through a heavier,
+   slower, more expensive render path, so only set it when the script
+   actually describes real movement.
 
 8. camera_motion — pick from: static, pan_left, pan_right, pan_up, pan_down,
    zoom_in, zoom_out, dolly_in, dolly_out, tilt_up, tilt_down, orbit_left,
    orbit_right. Default to static unless the input script explicitly
    describes camera movement (e.g. "camera slowly zooms in", "pans across
-   the room") — like pose_library, non-static values cost more to render, so
-   don't invent camera movement the script didn't ask for. If the script
-   explicitly says the camera never moves, always use static."""
+   the room") — like has_physical_action, non-static values cost more to
+   render, so don't invent camera movement the script didn't ask for. If the
+   script explicitly says the camera never moves, always use static.
+
+9. sfx names — free snake_case strings (e.g. "door_knock"), not a fixed
+   enum: this pipeline can render ANY topic, so sound effects can't be
+   limited to one hard-coded list. Prefer an entry from
+   CONSTANTS.sfx_library when it genuinely fits (it's a small pre-baked
+   seed set, cheap/instant to use); otherwise invent a short, clear,
+   descriptive snake_case name for whatever sound the script actually calls
+   for (e.g. "engine_start", "paint_brush_stroke") — a name not in the seed
+   list is generated on demand at render time, so don't avoid a sound just
+   because it isn't in the seed set. Only add an sfx entry when the script
+   actually implies a distinct sound, never decoratively."""
 
 class EpisodeCompile:
     @classmethod

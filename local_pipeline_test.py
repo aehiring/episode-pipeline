@@ -11,6 +11,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault("EPISODE_SCHEMA_PATH", os.path.join(os.path.dirname(__file__), "episode_schema.json"))
 os.environ.setdefault("EPISODE_AUDIO_DIR", "/tmp/rr_test/audio")
 os.environ.setdefault("SFX_ASSET_DIR", os.path.join(os.path.dirname(__file__), "assets/sfx"))
+# CPU-only, zero-GPU-cost test — must never trigger watchdog's ensure_models()
+# real multi-GB network downloads onto this machine.
+os.environ.setdefault("WATCHDOG_SKIP_MODEL_CHECK", "1")
 
 WORK = "/tmp/rr_test"; os.makedirs(WORK+"/audio", exist_ok=True)
 os.makedirs(WORK+"/scenes", exist_ok=True)
@@ -25,9 +28,9 @@ d2 = "Stay calm. Find Ren. Tell her the plan. Simple. Easy."
 d3 = "Reed. We missed the bus."
 EP = {"schema_version":"1.0","episode":{"title":"Reeds One Plan","logline":"test","lesson":"test","total_chunks":5,"scene_count":3,"characters_used":["REN","REED"]},
   "scenes":[
-    {"scene_number":1,"chunks":2,"duration_s":9.625,"start_time_s":0.0,"location":"HALLWAY","time_of_day":"DAY","characters":["REED"],"speaker":"NARRATOR","wardrobe":{"carry":True},"shot":"WIDE","keyframe_prompt":anchor+". HALLWAY from above, wide shot.","motion_prompts":["Camera drifts.","Light streams."],"dialogue":d1,"dialogue_word_count":wc(d1),"sfx":[{"name":"footsteps_floor","at_s":2.0}],"pose_library":"standing_neutral","camera_motion":"static"},
-    {"scene_number":2,"chunks":2,"duration_s":9.625,"start_time_s":9.625,"location":"HALLWAY","time_of_day":"DAY","characters":["REED"],"speaker":"REED","wardrobe":{"carry":True},"shot":"MEDIUM","keyframe_prompt":anchor+". REED at locker, medium shot.","motion_prompts":["REED opens locker.","REED nods."],"dialogue":d2,"dialogue_word_count":wc(d2),"sfx":[{"name":"school_bell","at_s":4.0}],"pose_library":"standing_neutral","camera_motion":"zoom_in"},
-    {"scene_number":3,"chunks":1,"duration_s":4.8125,"start_time_s":19.25,"location":"HALLWAY","time_of_day":"DAY","characters":["REN","REED"],"speaker":"REN","wardrobe":{"carry":True},"shot":"MEDIUM","keyframe_prompt":anchor+". REN behind REED, medium shot.","motion_prompts":["REED turns slowly."],"dialogue":d3,"dialogue_word_count":wc(d3),"sfx":[{"name":"gasp","at_s":2.0}],"pose_library":"standing_neutral","camera_motion":"static"}],
+    {"scene_number":1,"chunks":2,"duration_s":9.625,"start_time_s":0.0,"location":"HALLWAY","time_of_day":"DAY","characters":["REED"],"speaker":"NARRATOR","wardrobe":{"carry":True},"shot":"WIDE","keyframe_prompt":anchor+". HALLWAY from above, wide shot.","motion_prompts":["Camera drifts.","Light streams."],"dialogue":d1,"dialogue_word_count":wc(d1),"sfx":[{"name":"footsteps_floor","at_s":2.0}],"has_physical_action":False,"camera_motion":"static"},
+    {"scene_number":2,"chunks":2,"duration_s":9.625,"start_time_s":9.625,"location":"HALLWAY","time_of_day":"DAY","characters":["REED"],"speaker":"REED","wardrobe":{"carry":True},"shot":"MEDIUM","keyframe_prompt":anchor+". REED at locker, medium shot.","motion_prompts":["REED opens locker.","REED nods."],"dialogue":d2,"dialogue_word_count":wc(d2),"sfx":[{"name":"school_bell","at_s":4.0}],"has_physical_action":False,"camera_motion":"zoom_in"},
+    {"scene_number":3,"chunks":1,"duration_s":4.8125,"start_time_s":19.25,"location":"HALLWAY","time_of_day":"DAY","characters":["REN","REED"],"speaker":"REN","wardrobe":{"carry":True},"shot":"MEDIUM","keyframe_prompt":anchor+". REN behind REED, medium shot.","motion_prompts":["REED turns slowly."],"dialogue":d3,"dialogue_word_count":wc(d3),"sfx":[{"name":"gasp","at_s":2.0}],"has_physical_action":False,"camera_motion":"static"}],
   "totals":{"sum_chunks":5,"sum_duration_s":24.0625,"total_frames_16fps":385}}
 
 EP_JSON = json.dumps(EP, separators=(',',':'))
@@ -113,44 +116,37 @@ try:
     else: fail("validator", str(errs[:2]))
 except Exception as e: fail("validator", str(e))
 
-# 5b. Camera/pose upgrade — pose assets, template routing, dangling-link checks
-print("\n▶ STEP 5b: Camera/pose upgrade (pose assets + hybrid template routing)")
+# 5b. Camera/action upgrade — hybrid template routing, dangling-link checks.
+# No fixed pose-asset library anymore (has_physical_action is a free-text-
+# backed boolean, general to any topic) — this just checks the cheap/action
+# routing decision and that both template shapes build without dangling links.
+print("\n▶ STEP 5b: Camera/action upgrade (hybrid template routing)")
 try:
     import build_v17_graph as G2
-    S2 = json.load(open(os.environ["EPISODE_SCHEMA_PATH"]))
-    pose_need = set(S2["x_constants"]["pose_library"])
-    pose_dir = os.environ["SFX_ASSET_DIR"].replace("sfx", "poses") if "sfx" in os.environ["SFX_ASSET_DIR"] \
-        else os.path.join(os.path.dirname(__file__), "assets/poses")
-    pose_have = {d for d in os.listdir(pose_dir) if os.path.isfile(os.path.join(pose_dir, d, "pose.png"))} \
-        if os.path.isdir(pose_dir) else set()
-    if pose_have == pose_need:
-        ok(f"pose assets: all {len(pose_need)} present in {pose_dir}")
-    else:
-        fail("pose assets", f"missing={sorted(pose_need-pose_have)} extra={sorted(pose_have-pose_need)}")
 
     def dangling(g):
         return [(nid, k, v) for nid, node in g.items() for k, v in node["inputs"].items()
                 if isinstance(v, list) and len(v) == 2 and isinstance(v[0], str) and v[0] not in g]
 
     base_scene = dict(EP["scenes"][0])
-    cases = [("standing_neutral", "static", False), ("tree_pose", "static", True),
-             ("standing_neutral", "zoom_in", True), ("tree_pose", "zoom_in", True)]
+    cases = [(False, "static", False), (True, "static", True),
+             (False, "zoom_in", True), (True, "zoom_in", True)]
     all_ok = True
-    for pose, cam, expect_action in cases:
-        s = dict(base_scene, pose_library=pose, camera_motion=cam)
+    for action, cam, expect_action in cases:
+        s = dict(base_scene, has_physical_action=action, camera_motion=cam)
         routed = G2._needs_action_path(s)
         if routed != expect_action:
-            fail("routing", f"pose={pose} cam={cam}: expected action_path={expect_action}, got {routed}")
+            fail("routing", f"action={action} cam={cam}: expected action_path={expect_action}, got {routed}")
             all_ok = False; continue
         g = G2.scene_template_action(EP, s) if routed else G2.scene_template(EP, s)
         bad = dangling(g)
         if bad:
-            fail("template build", f"pose={pose} cam={cam}: dangling links {bad[:2]}")
+            fail("template build", f"action={action} cam={cam}: dangling links {bad[:2]}")
             all_ok = False
     if all_ok:
-        ok("hybrid routing + template builds: all 4 pose/camera combinations clean")
+        ok("hybrid routing + template builds: all 4 action/camera combinations clean")
 except Exception as e:
-    import traceback; fail("camera/pose upgrade", traceback.format_exc()[-400:])
+    import traceback; fail("camera/action upgrade", traceback.format_exc()[-400:])
 
 # 6. Watchdog scene-loop orchestration — direct regression test for the fixed
 #    while-loop bug: a mocked ComfyUI stands in for /prompt + /history, and we
