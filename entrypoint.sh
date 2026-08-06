@@ -3,7 +3,7 @@
 set -uo pipefail   # NOT -e: one bad download must not crash-loop the box
 
 M=/models
-mkdir -p "$M"/{diffusion_models,text_encoders,vae,upscale_models,audio_encoders,loras,input,output,episode_state}
+mkdir -p "$M"/{diffusion_models,text_encoders,vae,upscale_models,audio_encoders,clip_vision,loras,input,output,episode_state}
 mkdir -p "$M/input/episode_audio" "$M/output/scenes"
 
 if command -v hf >/dev/null 2>&1; then HF="hf";
@@ -90,7 +90,15 @@ get "$CAM" low_noise_model/diffusion_pytorch_model.safetensors  "$M/diffusion_mo
 LX2V=lightx2v/Wan2.2-Lightning
 get "$LX2V" Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/high_noise_model.safetensors "$M/loras" "wan22_i2v_lightx2v_4steps_high_noise.safetensors" || true
 get "$LX2V" Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/low_noise_model.safetensors  "$M/loras" "wan22_i2v_lightx2v_4steps_low_noise.safetensors"  || true
-echo "  note: LatentSync lip-sync model — ComfyUI-LatentSyncWrapper node fetches its own checkpoint on first use; verify on first real run"
+# 3. CLIP vision embedding of the scene's own FLUX Kontext keyframe, fed into
+#    WanImageToVideo's optional clip_vision_output input alongside start_image
+#    — a native, well-documented lever for reinforcing character identity/
+#    framing over the length of a generation (2026-08-06 finding: our I2V
+#    action path was using start_image alone, which is known to fade).
+#    Wan2.2's own repackaged repo doesn't ship this file (clip_vision is a
+#    2.1-era artifact reused as-is — the encoder itself is version-agnostic),
+#    so it's pulled from the 2.1 repackaged repo instead.
+get Comfy-Org/Wan_2.1_ComfyUI_repackaged split_files/clip_vision/clip_vision_h.safetensors "$M/clip_vision" || true
 
 # ── input dir: LoadAudio-class nodes resolve against ComfyUI/input ──
 if [ ! -L /opt/ComfyUI/input ]; then rm -rf /opt/ComfyUI/input; ln -s "$M/input" /opt/ComfyUI/input; fi

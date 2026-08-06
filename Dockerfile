@@ -2,7 +2,7 @@
 FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        git ffmpeg libgl1 libglib2.0-0 aria2 tmux curl ca-certificates \
+        git ffmpeg libgl1 libglib2.0-0 aria2 tmux curl ca-certificates build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt
@@ -26,20 +26,22 @@ RUN set -eux; \
         https://github.com/set-soft/ComfyUI-AudioBatch.git \
         https://github.com/Fannovel16/ComfyUI-Frame-Interpolation.git \
         https://github.com/kijai/ComfyUI-WanVideoWrapper.git \
-        https://github.com/ShmuelRonen/ComfyUI-LatentSyncWrapper.git \
     ; do git clone --depth 1 "$repo"; done; \
     for d in */ ; do \
         if [ -f "$d/requirements.txt" ]; then pip install -r "$d/requirements.txt" || true; fi; \
     done
 # NOTE: jerilseb/ComfyUI-ElevenLabs RETIRED — replaced by RenReedTTS (own node)
-# ComfyUI-LatentSyncWrapper (face detection) and ComfyUI-WanVideoWrapper (camera
-# control) both need mediapipe
-RUN pip install mediapipe || echo "mediapipe install failed, camera control / lip-sync may not work — investigate before relying on it"
+# NOTE: ComfyUI-LatentSyncWrapper REMOVED (confirmed incompatible with cartoon
+# faces, trained on photoreal faces only — see project memory). Only
+# ComfyUI-WanVideoWrapper (camera control + VACE) needs mediapipe now.
+RUN pip install mediapipe || echo "mediapipe install failed, camera control may not work — investigate before relying on it"
 
 # ── cu128 torch (Blackwell sm_120) — must come AFTER node reqs ──
 RUN pip install --upgrade --force-reinstall \
         torch torchvision torchaudio \
         --index-url https://download.pytorch.org/whl/cu128
+# build-essential (above) provides gcc so sageattention's CUDA kernels actually
+# compile instead of silently falling back to default attention every run.
 RUN pip install sageattention || echo "sageattention unavailable, using default attention"
 RUN python -c "import torch; \
     cuda = torch.version.cuda or '0.0'; \

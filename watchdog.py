@@ -123,6 +123,11 @@ HF_MODELS = [
     (_CAM, "low_noise_model/diffusion_pytorch_model.safetensors", "diffusion_models/wan2.2_fun_camera_low_noise_14B.safetensors", 5_000_000_000, False),
     (_LX2V, "Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/high_noise_model.safetensors", "loras/wan22_i2v_lightx2v_4steps_high_noise.safetensors", 200_000_000, False),
     (_LX2V, "Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/low_noise_model.safetensors", "loras/wan22_i2v_lightx2v_4steps_low_noise.safetensors", 200_000_000, False),
+    # CLIP vision embedding, fed into WanImageToVideo's clip_vision_output on the
+    # no-camera action path — reinforces character identity/framing alongside
+    # start_image (2026-08-06 finding). Version-agnostic encoder, pulled from
+    # the 2.1 repackaged repo since Wan2.2's own repo doesn't ship this file.
+    ("Comfy-Org/Wan_2.1_ComfyUI_repackaged", "split_files/clip_vision/clip_vision_h.safetensors", "clip_vision/clip_vision_h.safetensors", 400_000_000, False),
 ]
 
 # direct-URL fallbacks (entrypoint.sh's non-HF-API curl downloads)

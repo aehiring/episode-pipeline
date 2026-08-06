@@ -277,6 +277,19 @@ def scene_template_action(ep, scene, anchor_image="anchor_current.png"):
     mouth movement just isn't frame-accurate to phonemes, which is an
     acceptable tradeoff for this content style.
 
+    Identity/framing reinforcement (2026-08-06, added after the v3 render
+    showed multi-character scenes losing character identity and an extreme-
+    close-up scene drifting to a generic landscape): both conditioning nodes
+    now also get a CLIPVisionEncode of the same keyframe passed as
+    clip_vision_output, alongside start_image. Researched two paths for
+    this — Wan-family VACE (Kijai's WanVideoWrapper) has a confirmed-working
+    reference-image mechanism but requires adopting its entire separate node
+    ecosystem (own model/VAE/text-encoder/sampler nodes, ~65GB new
+    checkpoint) — versus this native clip_vision_output input, which ships
+    in core ComfyUI's own WanImageToVideo/WanCameraImageToVideo and needs
+    only a small (~2.5GB) CLIP vision encoder. Trying the cheap native lever
+    first; VACE stays a documented option if this isn't enough on its own.
+
     Node shapes verified against a live install (2026-08-06, first real GPU
     test): WanImageToVideo and WanCameraImageToVideo matched as written.
     WanCameraEmbedding's real input is "camera_pose" (a 9-value Title Case
@@ -299,6 +312,16 @@ def scene_template_action(ep, scene, anchor_image="anchor_current.png"):
     k480 = N("ImageScale", {"image": L(kf), "upscale_method": "lanczos", "width": 832, "height": 480, "crop": "center"}, "->832x480")
     motion_text = " ".join(scene["motion_prompts"])
 
+    # CLIP vision embedding of the scene's own keyframe, fed alongside
+    # start_image (2026-08-06 finding): start_image-only conditioning is
+    # documented to fade over a generation — face/character drifts toward a
+    # generic default the longer it runs or the more the framing/pose changes,
+    # which matches what we saw live (multi-character scenes losing identity,
+    # an extreme-close-up scene drifting to a generic landscape). Native,
+    # well-supported ComfyUI mechanism, no new checkpoint ecosystem needed.
+    cv_loader = N("CLIPVisionLoader", {"clip_name": "clip_vision_h.safetensors"}, "CLIP Vision (identity)")
+    cv_encode = N("CLIPVisionEncode", {"clip_vision": L(cv_loader), "image": L(k480, 0), "crop": "center"}, "CLIP Vision encode")
+
     if cam_motion != "static":
         models = _wan_camera_loaders(N, L)  # dedicated Fun Camera Control checkpoint — see its docstring
     else:
@@ -312,11 +335,12 @@ def scene_template_action(ep, scene, anchor_image="anchor_current.png"):
         cond = N("WanCameraImageToVideo", {
             "positive": L(pos), "negative": L(models["wneg"]), "vae": L(models["wvae"]),
             "width": 832, "height": 480, "length": cam_length, "batch_size": 1,
-            "start_image": L(k480, 0), "camera_conditions": L(cam_embed, 0)}, "camera cond")
+            "start_image": L(k480, 0), "camera_conditions": L(cam_embed, 0),
+            "clip_vision_output": L(cv_encode, 0)}, "camera cond")
     else:
         cond = N("WanImageToVideo", {"positive": L(pos), "negative": L(models["wneg"]), "vae": L(models["wvae"]),
             "width": 832, "height": 480, "length": total_frames, "batch_size": 1,
-            "start_image": L(k480, 0)}, "I2V cond")
+            "start_image": L(k480, 0), "clip_vision_output": L(cv_encode, 0)}, "I2V cond")
 
     # EXPERIMENT (2026-08-06, not yet verified live): user reported the
     # rendered motion feels slightly slow-motion — a known tradeoff of the
