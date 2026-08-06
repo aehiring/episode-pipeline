@@ -41,10 +41,6 @@ RUN pip install --upgrade --force-reinstall \
         torch torchvision torchaudio \
         --index-url https://download.pytorch.org/whl/cu128
 RUN pip install sageattention || echo "sageattention unavailable, using default attention"
-# ComfyUI-LatentSyncWrapper's audio save path needs torchcodec (newer
-# torchaudio.save() backend requirement) — found live: "TorchCodec is
-# required for save_with_torchcodec" ImportError on the lip-sync overlay.
-RUN pip install torchcodec || echo "torchcodec install failed — LatentSync lip-sync overlay will fail until fixed"
 RUN python -c "import torch; \
     cuda = torch.version.cuda or '0.0'; \
     print('torch', torch.__version__, '| built against CUDA', cuda); \
