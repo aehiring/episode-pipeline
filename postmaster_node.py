@@ -8,7 +8,8 @@ import os, json, subprocess, shutil
 
 SFX_DIR = os.environ.get("SFX_ASSET_DIR", "/opt/pipeline/assets/sfx")
 MUSIC_PATH = os.environ.get("EPISODE_MUSIC_PATH", "/models/output/episode_music.mp3")
-MUSIC_VOLUME = 0.2  # ducked well under dialogue/SFX
+MUSIC_BASE_VOLUME = 0.5  # pre-sidechain safety floor — even if ducking somehow doesn't
+                         # trigger, music is never above half its source volume
 GRADE = "fps=24,scale=1280:720:flags=lanczos,eq=contrast=1.06:saturation=1.14:gamma=0.98," \
         "unsharp=5:5:0.45:5:5:0.0,noise=alls=1.5:allf=t,format=yuv420p"
 
@@ -32,12 +33,23 @@ def build_sfx_cmd(src, ep, out, sfx_dir=None, grade=GRADE, music_path=None):
     n_inputs = 1 + len(events) + (1 if has_music else 0)
     if events or has_music:
         parts = [f"[{i+1}:a]adelay={int(t*1000)}|{int(t*1000)}[fx{i}]" for i, (t, _) in enumerate(events)]
-        mix_labels = "[0:a]" + "".join(f"[fx{i}]" for i in range(len(events)))
+        voice_labels = "[0:a]" + "".join(f"[fx{i}]" for i in range(len(events)))
         if has_music:
-            # loop (in case shorter than episode) + duck under dialogue/SFX
-            parts.append(f"[{music_idx}:a]aloop=loop=-1:size=2e9,volume={MUSIC_VOLUME}[music]")
-            mix_labels += "[music]"
-        fc = ";".join(parts) + f";{mix_labels}amix=inputs={n_inputs}:duration=first:normalize=0[aout]"
+            # Sidechain-duck music against the dialogue+SFX bus, rather than a
+            # single fixed volume — music automatically drops further whenever
+            # there's actual dialogue/SFX playing, and can sit more audibly
+            # during quiet/no-dialogue stretches (e.g. a pure establishing
+            # shot), instead of being uniformly quiet everywhere. Found via
+            # user feedback (2026-08-06): music must never risk masking
+            # character dialogue, whatever the source track's mastering level.
+            n_voice = 1 + len(events)
+            parts.append(f"{voice_labels}amix=inputs={n_voice}:duration=first:normalize=0[voice_sfx]")
+            parts.append(f"[{music_idx}:a]aloop=loop=-1:size=2e9,volume={MUSIC_BASE_VOLUME}[music_base]")
+            parts.append("[music_base][voice_sfx]sidechaincompress=threshold=0.04:ratio=10:"
+                         "attack=5:release=400:makeup=1[music_ducked]")
+            fc = ";".join(parts) + ";[voice_sfx][music_ducked]amix=inputs=2:duration=first:normalize=0[aout]"
+        else:
+            fc = ";".join(parts) + f";{voice_labels}amix=inputs={n_inputs}:duration=first:normalize=0[aout]"
         cmd += ["-filter_complex", fc, "-map", "0:v", "-map", "[aout]"]
     else:
         cmd += ["-map", "0:v", "-map", "0:a?"]
