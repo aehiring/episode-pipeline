@@ -24,6 +24,20 @@ STYLE_ANCHOR = "3D animated cartoon, Pixar-style, soft rounded shapes, warm colo
 ANCHOR_FILENAME_PREFIX = "anchor/ANCHOR"
 SCENES_DIR = "/models/output/scenes"
 
+# schema's 13-value camera_motion enum -> WanCameraEmbedding's real "camera_pose"
+# combo (verified against a live install: only 9 distinct values, Title Case
+# strings, no separate dolly/tilt axis — nearest equivalent used where the
+# schema has more granularity than this node supports).
+CAMERA_POSE_MAP = {
+    "static": "Static",
+    "pan_left": "Pan Left", "pan_right": "Pan Right",
+    "pan_up": "Pan Up", "pan_down": "Pan Down",
+    "zoom_in": "Zoom In", "zoom_out": "Zoom Out",
+    "dolly_in": "Zoom In", "dolly_out": "Zoom Out",
+    "tilt_up": "Pan Up", "tilt_down": "Pan Down",
+    "orbit_left": "Anti Clockwise (ACW)", "orbit_right": "ClockWise (CW)",
+}
+
 
 def _graph():
     """Fresh node-dict + id counter + N()/L() helpers, scoped per template so
@@ -194,16 +208,15 @@ def scene_template_action(ep, scene, anchor_image="anchor_current.png"):
     decoupled lip-sync pass (silent motion first, mouth-sync after — the
     video model isn't fighting body motion and mouth accuracy at once).
 
-    The camera-embedding and lip-sync nodes are NOT yet verified against a
-    live ComfyUI install — check /object_info on the running instance for
-    the ACTUAL registered class_type/input names if these come back red on
-    the first real GPU submission; watchdog.ensure_models() cannot fix a
-    wrong node/input name, only a missing model file, so a node-shape
-    mismatch here is the one thing that would still need a manual code
-    patch (not a reboot) mid-run. WanImageToVideo itself is native/core
-    ComfyUI, so that half is expected to work as written. Everything
-    upstream (Kontext keyframe, anchor loading) is the same proven code as
-    scene_template() — only the motion stage differs.
+    Node shapes verified against a live install (2026-08-06, first real GPU
+    test): WanImageToVideo and WanCameraImageToVideo matched as written.
+    WanCameraEmbedding's real input is "camera_pose" (a 9-value Title Case
+    combo, not our 13-value snake_case camera_motion) — mapped via
+    CAMERA_POSE_MAP above. LatentSyncNode's real required inputs are
+    images/audio/seed/lips_expression/inference_steps, not video/
+    video_frame_rate. Everything upstream (Kontext keyframe, anchor loading)
+    is the same proven code as scene_template() — only the motion stage
+    differs.
     =============================================================================
     """
     G, N, L = _graph()
@@ -223,8 +236,9 @@ def scene_template_action(ep, scene, anchor_image="anchor_current.png"):
     pos = N("CLIPTextEncode", {"clip": L(i2v["wclip"]), "text": motion_text}, "I2V pos")
 
     if cam_motion != "static":
-        cam_embed = N("WanCameraEmbedding", {"camera_motion": cam_motion, "width": 832, "height": 480, "length": total_frames}, "camera embed")
-        cond = N("WanCameraImageToVideo", {  # VERIFY: exact WanVideoWrapper input names
+        cam_embed = N("WanCameraEmbedding", {"camera_pose": CAMERA_POSE_MAP.get(cam_motion, "Static"),
+            "width": 832, "height": 480, "length": total_frames}, "camera embed")
+        cond = N("WanCameraImageToVideo", {
             "positive": L(pos), "negative": L(i2v["wneg"]), "vae": L(i2v["wvae"]),
             "width": 832, "height": 480, "length": total_frames, "batch_size": 1,
             "start_image": L(k480, 0), "camera_conditions": L(cam_embed, 0)}, "camera cond")
@@ -244,8 +258,8 @@ def scene_template_action(ep, scene, anchor_image="anchor_current.png"):
     dec = N("VAEDecode", {"samples": L(lo_pass), "vae": L(i2v["wvae"])}, f"decode {total_frames}f")
 
     tts = N("RenReedTTS", {"episode_json": ep_json, "scene_number": n}, "TTS (loud)")
-    lipsync = N("LatentSyncNode", {  # VERIFY: exact ComfyUI-LatentSyncWrapper node/input names
-        "video": L(dec), "audio": L(tts, 0), "video_frame_rate": 16}, "lip-sync overlay")
+    lipsync = N("LatentSyncNode", {"images": L(dec), "audio": L(tts, 0),
+        "seed": 1247, "lips_expression": 1.5, "inference_steps": 20}, "lip-sync overlay")
 
     f1 = N("ImageFromBatch", {"image": L(lipsync, 0), "batch_index": 1, "length": 1}, "frame1")
     rest = N("ImageFromBatch", {"image": L(lipsync, 0), "batch_index": 1, "length": total_frames - 1}, "f1..last")
