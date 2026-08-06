@@ -178,7 +178,40 @@ VISUAL QUALITY RULES — these affect what actually renders, follow them exactly
     motion_prompts must say so explicitly and completely — e.g. "REED's
     palm presses flat against the rock surface, fingers spread, full
     contact" rather than "REED reaches toward the rock" — describe the
-    contact itself, not just the movement leading up to it."""
+    contact itself, not just the movement leading up to it.
+
+11. OFF-SCREEN SPEAKER SCENES — NO MOUTH MOVEMENT ON THE SILENT CHARACTER:
+    on the action/camera path (has_physical_action or non-static camera_motion
+    with speaker set but that speaker NOT among the scene's own characters —
+    e.g. a coach's voice heard over a student's solo reaction shot), there is
+    no lip-sync at all on that path; the speaker's audio just plays under
+    whatever video renders. If motion_prompts describes the ON-SCREEN
+    character's mouth, jaw, or lips moving, it reads as that character
+    mouthing the off-screen speaker's dialogue, which is wrong and confusing.
+    Found live (2026-08-06): a student's "jaw relaxes, mouth slightly open"
+    during a coach's off-screen line looked like she was lip-syncing words
+    that weren't hers. For any on-screen character who is NOT this scene's
+    speaker, keep mouth/jaw out of motion_prompts entirely (describe body,
+    shoulders, eyes, expression instead) — or state explicitly that her lips
+    stay closed/still if the moment calls it out.
+
+12. MULTI-CHARACTER IDENTITY ORDER AND ANCHORING (prevents attribute/
+    wardrobe leakage): when 2+ characters appear in the same keyframe_prompt,
+    this is a documented diffusion-model failure mode — similar-class
+    subjects (e.g. two humans) in one prompt can have their described
+    attributes, especially clothing and hairstyle, cross-bind to the wrong
+    name, causing characters to swap outfits between scenes even though each
+    was correctly described. Found live (2026-08-06): Coach Nia and Ren swapped
+    shirts/hairstyle in one scene of a test episode. Mitigate with two rules,
+    every time 2+ characters share a keyframe_prompt: (a) always name them in
+    the SAME order every time they co-appear across the whole episode — pick
+    the order used the first time they appear together and never flip it in
+    a later scene; (b) each character's full bible description must sit
+    immediately next to their own name, never separated by the other
+    character's details in between. Note this pipeline runs FLUX-family
+    models at cfg=1.0 (guidance-distilled), so negative prompts have no
+    effect here — identity/wardrobe control has to come entirely from how
+    the positive keyframe_prompt is worded, not from a negative prompt."""
 
 class EpisodeCompile:
     @classmethod
