@@ -10,14 +10,23 @@ API = "https://api.elevenlabs.io/v1/text-to-speech/{vid}?output_format=mp3_44100
 MIN_BYTES = 4000
 
 def _parse_voice_map(raw=None):
+    """A malformed trailing entry (e.g. ELEVENLABS_VOICES truncated by some
+    intermediate shell/env-string layer splitting on a space inside a
+    multi-word character name like "COACH NIA") is logged and skipped rather
+    than failing the whole map — _require_voice() below still fails loudly
+    for any speaker that's actually missing a voice id, so a genuinely
+    needed voice is never silently substituted; only unrelated/unreachable
+    trailing junk is tolerated."""
     raw = raw if raw is not None else os.environ.get("ELEVENLABS_VOICES", "")
     m = {}
     for part in [p for p in raw.split(",") if p.strip()]:
         if ":" not in part:
-            raise RuntimeError(f"RenReedTTS FATAL: bad ELEVENLABS_VOICES entry '{part}' (need NAME:voice_id)")
+            print(f"  [RenReedTTS WARN] skipping malformed ELEVENLABS_VOICES entry '{part}' (need NAME:voice_id)")
+            continue
         k, v = part.split(":", 1)
         if not v.strip():
-            raise RuntimeError(f"RenReedTTS FATAL: empty voice id for '{k.strip()}'")
+            print(f"  [RenReedTTS WARN] skipping empty voice id for '{k.strip()}'")
+            continue
         m[k.strip().upper()] = v.strip()
     return m
 
