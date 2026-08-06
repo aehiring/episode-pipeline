@@ -180,6 +180,23 @@ def scene_template(ep, scene, anchor_image="anchor_current.png"):
     return G
 
 
+def _camera_safe_length(frames):
+    """WanCameraEmbedding's internal reshape (repeat_interleave first frame
+    x4, then view(b, f//4, 4, c, h, w) where f=length+3) only works when
+    (length+3) % 4 == 0 — confirmed live (2026-08-06): our chunk-based
+    frame counts (chunks*77) only satisfy this at chunks=1 or chunks=5;
+    chunks=2/3/4 (154/231/308 frames) all raise a reshape-size error.
+    Round UP to the nearest valid length so camera-motion scenes at any
+    chunk count still render; the frame1/rest slicing in
+    scene_template_action already trims the decoded output back down to
+    the scene's real total_frames afterward (explicit `length` args there
+    take only the first N frames of whatever the camera pass decoded)."""
+    L = frames
+    while (L + 3) % 4 != 0:
+        L += 1
+    return L
+
+
 def _needs_action_path(scene):
     """Cheap-path scenes (just standing, static camera) keep using the plain
     S2V scene_template above — only pay for the heavier general I2V action/
@@ -236,11 +253,12 @@ def scene_template_action(ep, scene, anchor_image="anchor_current.png"):
     pos = N("CLIPTextEncode", {"clip": L(i2v["wclip"]), "text": motion_text}, "I2V pos")
 
     if cam_motion != "static":
+        cam_length = _camera_safe_length(total_frames)  # padded for WanCameraEmbedding's reshape constraint
         cam_embed = N("WanCameraEmbedding", {"camera_pose": CAMERA_POSE_MAP.get(cam_motion, "Static"),
-            "width": 832, "height": 480, "length": total_frames}, "camera embed")
+            "width": 832, "height": 480, "length": cam_length}, "camera embed")
         cond = N("WanCameraImageToVideo", {
             "positive": L(pos), "negative": L(i2v["wneg"]), "vae": L(i2v["wvae"]),
-            "width": 832, "height": 480, "length": total_frames, "batch_size": 1,
+            "width": 832, "height": 480, "length": cam_length, "batch_size": 1,
             "start_image": L(k480, 0), "camera_conditions": L(cam_embed, 0)}, "camera cond")
     else:
         cond = N("WanImageToVideo", {"positive": L(pos), "negative": L(i2v["wneg"]), "vae": L(i2v["wvae"]),
