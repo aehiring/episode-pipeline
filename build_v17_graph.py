@@ -97,12 +97,18 @@ def anchor_template(ep):
 
 def scene_template(ep, scene, anchor_image="anchor_current.png"):
     """Full render for one scene: Kontext keyframe (from the saved ANCHOR) ->
-    832x480 -> TTS -> S2V init+4 extends -> decode -> first-frame fix -> save.
+    832x480 -> TTS -> S2V init + (chunks-1) extends -> decode -> first-frame
+    fix -> save. Extend count MUST track scene['chunks'] (1-5) — a fixed
+    5-segment loop here was the bug that made every scene render a forced 24s
+    regardless of its real length (found live on the 59-scene render: 826s
+    video for what should have been ~380s of content).
     `anchor_image` must already be sitting in ComfyUI's input dir (watchdog's
     job, after the anchor prompt completes) — LoadImage resolves it from there."""
     G, N, L = _graph()
     ep_json = json.dumps(ep)
     n = scene["scene_number"]
+    chunks = scene["chunks"]
+    total_frames = chunks * 77
 
     kx = _kontext_loaders(N, L)
     anc_img = N("LoadImage", {"image": anchor_image}, "ANCHOR (loaded)")
@@ -125,16 +131,16 @@ def scene_template(ep, scene, anchor_image="anchor_current.png"):
         "width": 832, "height": 480, "length": 77, "batch_size": 1,
         "audio_encoder_output": L(aemb), "ref_image": L(k480)}, "S2V init")
     acc = L(KS(L(c1, 2), L(c1, 0), L(c1, 1), "KSA c1"))
-    for i in range(2, 6):
+    for i in range(2, chunks + 1):  # (chunks-1) extends; chunks=1 -> no extends, just the init 77 frames
         ex = N("WanSoundImageToVideoExtend", {"positive": L(wpos), "negative": L(wan["wneg"]), "vae": L(wan["wvae"]),
             "length": 77, "video_latent": acc, "audio_encoder_output": L(aemb), "ref_image": L(k480)}, f"S2V ext{i}")
         sN = KS(L(ex, 2), L(ex, 0), L(ex, 1), f"KSA c{i}")
         acc = L(N("LatentConcat", {"samples1": acc, "samples2": L(sN), "dim": "t"}, f"acc{i}"))
 
-    dec = N("VAEDecode", {"samples": acc, "vae": L(wan["wvae"])}, "decode 385f")
+    dec = N("VAEDecode", {"samples": acc, "vae": L(wan["wvae"])}, f"decode {total_frames}f")
     f1 = N("ImageFromBatch", {"image": L(dec), "batch_index": 1, "length": 1}, "frame1")
-    rest = N("ImageFromBatch", {"image": L(dec), "batch_index": 1, "length": 384}, "f1..384")
-    fix = N("ImageBatch", {"image1": L(f1), "image2": L(rest)}, "fixed 385")
+    rest = N("ImageFromBatch", {"image": L(dec), "batch_index": 1, "length": total_frames - 1}, "f1..last")
+    fix = N("ImageBatch", {"image1": L(f1), "image2": L(rest)}, f"fixed {total_frames}")
     N("VHS_VideoCombine", {"frame_rate": 16, "loop_count": 0, "filename_prefix": "scenes/scene",
         "format": "video/h264-mp4", "pix_fmt": "yuv420p", "crf": 17, "save_metadata": False,
         "trim_to_audio": True, "pingpong": False, "save_output": True,
@@ -178,6 +184,7 @@ def scene_template_action(ep, scene, anchor_image="anchor_current.png"):
     n = scene["scene_number"]
     pose_name = scene.get("pose_library", "standing_neutral")
     cam_motion = scene.get("camera_motion", "static")
+    total_frames = scene["chunks"] * 77  # same chunk-accurate length as scene_template — never hardcode 77/385
 
     kx = _kontext_loaders(N, L)
     anc_img = N("LoadImage", {"image": anchor_image}, "ANCHOR (loaded)")
@@ -198,16 +205,16 @@ def scene_template_action(ep, scene, anchor_image="anchor_current.png"):
         pose_sampler = N("WanVideoSampler", {  # VERIFY: exact WanVideoWrapper sampler node/inputs
             "model": L(pose_model_hi), "positive": L(pose_pos), "negative": L(kx["kneg"]),
             "start_image": L(k480, 0), "control_image": L(pose_ref, 0),
-            "width": 832, "height": 480, "length": 77, "steps": 6, "cfg": 1.0}, "pose pass")
+            "width": 832, "height": 480, "length": total_frames, "steps": 6, "cfg": 1.0}, "pose pass")
         current_video = L(pose_sampler, 0)
 
     if cam_motion != "static":
         cam_model_hi = N("UNETLoader", {"unet_name": "diffusion_pytorch_model.safetensors", "weight_dtype": "default"}, "FunCamera hi (VERIFY PATH)")
-        cam_embed = N("WanCameraEmbedding", {"camera_motion": cam_motion, "width": 832, "height": 480, "length": 77}, "camera embed")
+        cam_embed = N("WanCameraEmbedding", {"camera_motion": cam_motion, "width": 832, "height": 480, "length": total_frames}, "camera embed")
         cam_start = current_video if current_video else L(k480, 0)
         cam_video = N("WanCameraImageToVideo", {  # VERIFY: exact WanVideoWrapper input names
             "model": L(cam_model_hi), "start_image": cam_start, "camera_embedding": L(cam_embed, 0),
-            "width": 832, "height": 480, "length": 77, "steps": 6, "cfg": 1.0}, "camera pass")
+            "width": 832, "height": 480, "length": total_frames, "steps": 6, "cfg": 1.0}, "camera pass")
         current_video = L(cam_video, 0)
 
     if current_video is None:
@@ -221,8 +228,8 @@ def scene_template_action(ep, scene, anchor_image="anchor_current.png"):
         "video": current_video, "audio": L(tts, 0), "video_frame_rate": 16}, "lip-sync overlay")
 
     f1 = N("ImageFromBatch", {"image": L(lipsync, 0), "batch_index": 1, "length": 1}, "frame1")
-    rest = N("ImageFromBatch", {"image": L(lipsync, 0), "batch_index": 1, "length": 384}, "f1..384")
-    fix = N("ImageBatch", {"image1": L(f1), "image2": L(rest)}, "fixed 385")
+    rest = N("ImageFromBatch", {"image": L(lipsync, 0), "batch_index": 1, "length": total_frames - 1}, "f1..last")
+    fix = N("ImageBatch", {"image1": L(f1), "image2": L(rest)}, f"fixed {total_frames}")
     N("VHS_VideoCombine", {"frame_rate": 16, "loop_count": 0, "filename_prefix": "scenes/scene",
         "format": "video/h264-mp4", "pix_fmt": "yuv420p", "crf": 17, "save_metadata": False,
         "trim_to_audio": True, "pingpong": False, "save_output": True,
