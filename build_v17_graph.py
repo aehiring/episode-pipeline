@@ -276,11 +276,23 @@ def scene_template_action(ep, scene, anchor_image="anchor_current.png"):
     dec = N("VAEDecode", {"samples": L(lo_pass), "vae": L(i2v["wvae"])}, f"decode {total_frames}f")
 
     tts = N("RenReedTTS", {"episode_json": ep_json, "scene_number": n}, "TTS (loud)")
-    lipsync = N("LatentSyncNode", {"images": L(dec), "audio": L(tts, 0),
-        "seed": 1247, "lips_expression": 1.5, "inference_steps": 20}, "lip-sync overlay")
+    speaker = scene.get("speaker", "NONE")
+    if speaker not in ("NONE", "NARRATOR"):
+        # Only run the lip-sync overlay when a character is actually speaking
+        # on screen — LatentSync's face-analysis step fails ("Face not
+        # detected") on speaker=NONE scenes that describe no visible
+        # character at all (found live 2026-08-06: scene 1 is a pure
+        # establishing shot, no characters yet). NARRATOR scenes are also
+        # skipped since compiler rule 2 already requires zero visible faces
+        # in them, so there'd be nothing to sync to either.
+        video_out = N("LatentSyncNode", {"images": L(dec), "audio": L(tts, 0),
+            "seed": 1247, "lips_expression": 1.5, "inference_steps": 20}, "lip-sync overlay")
+        video_out = L(video_out, 0)
+    else:
+        video_out = L(dec)
 
-    f1 = N("ImageFromBatch", {"image": L(lipsync, 0), "batch_index": 1, "length": 1}, "frame1")
-    rest = N("ImageFromBatch", {"image": L(lipsync, 0), "batch_index": 1, "length": total_frames - 1}, "f1..last")
+    f1 = N("ImageFromBatch", {"image": video_out, "batch_index": 1, "length": 1}, "frame1")
+    rest = N("ImageFromBatch", {"image": video_out, "batch_index": 1, "length": total_frames - 1}, "f1..last")
     fix = N("ImageBatch", {"image1": L(f1), "image2": L(rest)}, f"fixed {total_frames}")
     N("VHS_VideoCombine", {"frame_rate": 16, "loop_count": 0, "filename_prefix": "scenes/scene",
         "format": "video/h264-mp4", "pix_fmt": "yuv420p", "crf": 17, "save_metadata": False,
