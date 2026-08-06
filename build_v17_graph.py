@@ -97,12 +97,19 @@ def anchor_template(ep):
 
 def scene_template(ep, scene, anchor_image="anchor_current.png"):
     """Full render for one scene: Kontext keyframe (from the saved ANCHOR) ->
-    832x480 -> TTS -> S2V init+4 extends -> decode -> first-frame fix -> save.
+    832x480 -> TTS -> S2V init + (chunks-1) extends -> decode -> first-frame
+    fix -> save. Extend count MUST track scene['chunks'] (1-5) — a fixed
+    5-segment loop here was a real bug found on a full 59-scene render: every
+    scene was forced to render 24s regardless of its real length, and the
+    unscripted extra time had no matching audio (voice stops early, character
+    just stands there for the rest).
     `anchor_image` must already be sitting in ComfyUI's input dir (watchdog's
     job, after the anchor prompt completes) — LoadImage resolves it from there."""
     G, N, L = _graph()
     ep_json = json.dumps(ep)
     n = scene["scene_number"]
+    chunks = scene["chunks"]
+    total_frames = chunks * 77
 
     kx = _kontext_loaders(N, L)
     anc_img = N("LoadImage", {"image": anchor_image}, "ANCHOR (loaded)")
@@ -125,16 +132,16 @@ def scene_template(ep, scene, anchor_image="anchor_current.png"):
         "width": 832, "height": 480, "length": 77, "batch_size": 1,
         "audio_encoder_output": L(aemb), "ref_image": L(k480)}, "S2V init")
     acc = L(KS(L(c1, 2), L(c1, 0), L(c1, 1), "KSA c1"))
-    for i in range(2, 6):
+    for i in range(2, chunks + 1):  # (chunks-1) extends; chunks=1 -> none, just the init 77 frames
         ex = N("WanSoundImageToVideoExtend", {"positive": L(wpos), "negative": L(wan["wneg"]), "vae": L(wan["wvae"]),
             "length": 77, "video_latent": acc, "audio_encoder_output": L(aemb), "ref_image": L(k480)}, f"S2V ext{i}")
         sN = KS(L(ex, 2), L(ex, 0), L(ex, 1), f"KSA c{i}")
         acc = L(N("LatentConcat", {"samples1": acc, "samples2": L(sN), "dim": "t"}, f"acc{i}"))
 
-    dec = N("VAEDecode", {"samples": acc, "vae": L(wan["wvae"])}, "decode 385f")
+    dec = N("VAEDecode", {"samples": acc, "vae": L(wan["wvae"])}, f"decode {total_frames}f")
     f1 = N("ImageFromBatch", {"image": L(dec), "batch_index": 1, "length": 1}, "frame1")
-    rest = N("ImageFromBatch", {"image": L(dec), "batch_index": 1, "length": 384}, "f1..384")
-    fix = N("ImageBatch", {"image1": L(f1), "image2": L(rest)}, "fixed 385")
+    rest = N("ImageFromBatch", {"image": L(dec), "batch_index": 1, "length": total_frames - 1}, "f1..last")
+    fix = N("ImageBatch", {"image1": L(f1), "image2": L(rest)}, f"fixed {total_frames}")
     N("VHS_VideoCombine", {"frame_rate": 16, "loop_count": 0, "filename_prefix": "scenes/scene",
         "format": "video/h264-mp4", "pix_fmt": "yuv420p", "crf": 17, "save_metadata": False,
         "trim_to_audio": True, "pingpong": False, "save_output": True,
